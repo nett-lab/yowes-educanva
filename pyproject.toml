@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yowes-doc-generator"
+version = "0.1.0"
+description = "MCP server that generates teacher verification documents across countries"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "Pillow>=10.0.0",
+    "mcp>=2.0.0",
+    "python-telegram-bot>=21.0.0",
+]
+
+[project.scripts]
+yowes-mcp = "mcp_server:main"
+
+[tool.setuptools]
+py-modules = ["mcp_server"]
+
+[tool.setuptools.packages.find]
+include = ["countries", "countries.*"]
+
+[tool.setuptools.package-data]
+countries = ["foto/*", "fonts/*"]
