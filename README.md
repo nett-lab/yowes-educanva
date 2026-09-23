@@ -23,6 +23,8 @@
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage — MCP server](#usage--mcp-server)
+- [Telegram Bot](#telegram-bot)
+- [Instalasi Bot di RDP Windows Fresh](#instalasi-bot-di-rdp-windows-fresh)
 - [Legacy GUI](#legacy-gui)
 - [Project structure](#project-structure)
 - [Adding a new country](#adding-a-new-country)
@@ -313,6 +315,145 @@ python telegram_bot.py
 - For best results, wrap school names and position titles in quotes when they contain spaces.
 
 ---
+
+## Instalasi Bot di RDP Windows Fresh
+
+Panduan ini ditujukan untuk RDP Windows yang belum memiliki Python, Git, atau dependency project. Jalankan semua perintah berikut melalui **PowerShell**.
+
+### 1. Siapkan RDP
+
+- Login ke RDP menggunakan akun Windows yang akan menjalankan bot.
+- Pastikan koneksi internet aktif.
+- Gunakan akun dengan hak administrator saat memasang aplikasi.
+- Jangan menutup PowerShell jika bot dijalankan di foreground. Untuk bot 24/7, gunakan Task Scheduler pada langkah terakhir.
+
+### 2. Pasang Git dan Python
+
+Pada Windows 10/11 yang memiliki `winget`, jalankan PowerShell sebagai Administrator:
+
+```powershell
+winget install --id Git.Git -e --source winget
+winget install --id Python.Python.3.12 -e --source winget
+```
+
+Tutup PowerShell, buka kembali, lalu verifikasi:
+
+```powershell
+git --version
+python --version
+```
+
+Python yang didukung adalah **3.10 atau lebih baru**. Jika `winget` tidak tersedia, gunakan installer resmi:
+
+- Git: <https://git-scm.com/download/win>
+- Python: <https://www.python.org/downloads/windows/>
+
+Saat memasang Python, centang **Add Python to PATH**.
+
+### 3. Download project
+
+```powershell
+New-Item -ItemType Directory -Path C:\Apps -Force | Out-Null
+Set-Location C:\Apps
+git clone https://github.com/nett-lab/yowes-educanva.git
+Set-Location C:\Apps\yowes-educanva
+```
+
+### 4. Buat environment dan pasang dependency
+
+```powershell
+python -m venv .venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Verifikasi dependency dan source code:
+
+```powershell
+python -m py_compile telegram_bot.py mcp_server.py
+python -c "import telegram, PIL, mcp; print('Dependencies OK')"
+```
+
+### 5. Hubungkan token Telegram secara aman
+
+1. Buka Telegram dan chat `@BotFather`.
+2. Jalankan `/mybots`, pilih bot, lalu pilih **API Token**.
+3. Buat file `.env` dari template:
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+Isi file tersebut:
+
+```env
+BOT_TOKEN=ISI_TOKEN_BOT_DI_SINI
+```
+
+Simpan file lalu tutup Notepad. Token jangan dikirim ke chat, jangan dimasukkan ke README, dan jangan di-commit ke Git. File `.env` sudah dikecualikan oleh `.gitignore`.
+
+### 6. Jalankan dan uji bot
+
+```powershell
+Set-Location C:\Apps\yowes-educanva
+.\.venv\Scripts\Activate.ps1
+python telegram_bot.py
+```
+
+Buka bot di Telegram, lalu jalankan `/start`. Pilih negara, tipe dokumen, data personal, kemudian tekan **Buat Dokumen**. Hasil PNG akan tersimpan di `output/telegram/` dan dikirim kembali ke chat Telegram.
+
+Untuk menghentikan bot foreground, tekan `Ctrl+C`.
+
+### 7. Jalankan otomatis 24/7 dengan Task Scheduler
+
+Setelah bot berhasil diuji, buka PowerShell sebagai Administrator dari folder project dan jalankan:
+
+```powershell
+$project = 'C:\Apps\yowes-educanva'
+$python = "$project\.venv\Scripts\python.exe"
+$action = New-ScheduledTaskAction -Execute $python -Argument 'telegram_bot.py' -WorkingDirectory $project
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask -TaskName 'Yowes Telegram Bot' -Action $action -Trigger $trigger -RunLevel Highest -Force
+Start-ScheduledTask -TaskName 'Yowes Telegram Bot'
+```
+
+Perintah pengelolaan:
+
+```powershell
+Get-ScheduledTask -TaskName 'Yowes Telegram Bot'
+Stop-ScheduledTask -TaskName 'Yowes Telegram Bot'
+Start-ScheduledTask -TaskName 'Yowes Telegram Bot'
+Unregister-ScheduledTask -TaskName 'Yowes Telegram Bot' -Confirm:$false
+```
+
+Jika perlu melihat error secara langsung, hentikan task lalu jalankan bot foreground dari PowerShell. Log aplikasi akan tampil di terminal.
+
+### 8. Update versi terbaru
+
+Sebelum update, hentikan bot terlebih dahulu:
+
+```powershell
+Stop-ScheduledTask -TaskName 'Yowes Telegram Bot'
+Set-Location C:\Apps\yowes-educanva
+git pull origin main
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Start-ScheduledTask -TaskName 'Yowes Telegram Bot'
+```
+
+### Troubleshooting RDP
+
+| Gejala | Solusi |
+|--------|--------|
+| `python is not recognized` | Tutup dan buka kembali PowerShell setelah instalasi Python. Jika masih gagal, reinstall Python dengan opsi **Add Python to PATH**. |
+| `git is not recognized` | Restart PowerShell atau install ulang Git dari situs resmi. |
+| `BOT_TOKEN is not set` | Pastikan file `.env` berada di folder project dan berisi `BOT_TOKEN=...`. |
+| Bot tidak merespons | Pastikan hanya satu instance bot yang aktif dan internet RDP tidak diblokir firewall/proxy. |
+| Dokumen tersimpan tetapi tidak terkirim | Jalankan bot foreground untuk melihat error Telegram, lalu pastikan token masih valid dan bot tidak berjalan di server lain. |
+| `ModuleNotFoundError` | Aktifkan `.venv` lalu ulangi `python -m pip install -r requirements.txt`. |
 
 ## Legacy GUI
 
