@@ -265,12 +265,14 @@ A Telegram bot is also available for lightweight, on-the-go document generation.
 - Coin transaction history with charges, rewards, refunds, and admin grants
 - Gemini Pro stock management with JIO links, descriptions, and live stock count
 - Automatic localized redeem-code announcements with a one-tap redeem button
+- Mandatory subscription gate for `t.me/canvaproteam04` before using bot features
 - Admin settings for prices, rewards, redeem codes, and manual coin grants
 
 ### Setup
 
 1. Create a Telegram bot with BotFather.
-2. Copy the token into a local `.env` file (recommended):
+2. Add the bot to `@canvaproteam04` as an administrator so Telegram allows membership checks.
+3. Copy the token into a local `.env` file (recommended):
 
 ```bash
 cp .env.example .env
@@ -297,7 +299,7 @@ On Windows PowerShell:
 $env:BOT_TOKEN="your_bot_token_here"
 ```
 
-3. Install dependencies:
+4. Install dependencies:
 
 ```bash
 pip install -e .
@@ -308,6 +310,8 @@ pip install -e .
 ```bash
 python telegram_bot.py
 ```
+
+On first use, every user must open `https://t.me/canvaproteam04`, join the channel, and press **Saya Sudah Join / Check Membership**. The bot verifies the membership before opening the main menu.
 
 ### Example commands
 

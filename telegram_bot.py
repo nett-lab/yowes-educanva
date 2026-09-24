@@ -34,6 +34,8 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE_PATH = DATA_DIR / "bot.sqlite3"
+REQUIRED_CHANNEL = "@canvaproteam04"
+REQUIRED_CHANNEL_URL = "https://t.me/canvaproteam04"
 
 COUNTRY_LABELS = {
     "uk": "🇬🇧 United Kingdom",
@@ -482,6 +484,52 @@ def _back_keyboard(callback_data: str = "menu:main") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data=callback_data)]])
 
 
+def _membership_keyboard(update: Update) -> InlineKeyboardMarkup:
+    join_label = "📢 Join Channel" if _is_english(update) else "📢 Join Channel"
+    check_label = "✅ Check Membership" if _is_english(update) else "✅ Saya Sudah Join"
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(join_label, url=REQUIRED_CHANNEL_URL)],
+            [InlineKeyboardButton(check_label, callback_data="membership:check")],
+        ]
+    )
+
+
+async def require_channel_membership(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    user = update.effective_user
+    if user is None or context.bot is None:
+        return False
+    try:
+        member = await context.bot.get_chat_member(REQUIRED_CHANNEL, user.id)
+    except TelegramError as exc:
+        logger.warning("Could not verify channel membership for %s: %s", user.id, exc)
+        await _safe_reply_text(
+            update,
+            "Membership verification is temporarily unavailable. Please try again shortly."
+            if _is_english(update)
+            else "Verifikasi keanggotaan sedang tidak tersedia. Silakan coba lagi beberapa saat.",
+        )
+        return False
+
+    is_member = member.status in {"member", "administrator", "creator"}
+    if member.status == "restricted":
+        is_member = bool(getattr(member, "is_member", False))
+    if is_member:
+        return True
+
+    await _safe_reply_text(
+        update,
+        (
+            "*Join Required Channel*\n\nJoin our Telegram channel first, then press *Check Membership* to unlock the bot."
+            if _is_english(update)
+            else "*Wajib Join Channel*\n\nSilakan join channel Telegram terlebih dahulu, lalu tekan *Saya Sudah Join* untuk menggunakan bot."
+        ),
+        parse_mode="Markdown",
+        reply_markup=_membership_keyboard(update),
+    )
+    return False
+
+
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False) -> None:
     _user_from_update(update)
     if edit and update.callback_query is not None:
@@ -523,11 +571,15 @@ def _make_dashboard_text() -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_channel_membership(update, context):
+        return
     _process_referral(update, context)
     await show_main_menu(update, context)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_channel_membership(update, context):
+        return
     help_text = (
         "*Quick guide*\n\n1. Press *Canva Doc Education*\n2. Choose a country\n3. Choose a document type\n4. Complete the profile data\n5. Confirm and receive your PNG files\n\n"
         "*Quick command*\n`/generate us John Smith \"Valley High\" \"Head of Science Department\" \"12/05/1988\" Male teacher_id,employment_letter`\n\nGender: `Random`, `Male`, `Female`"
@@ -547,6 +599,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def countries(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_channel_membership(update, context):
+        return
     lines = []
     for code in list_countries():
         gen = get_country(code)()
@@ -705,6 +759,8 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
 
 
 async def schools(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_channel_membership(update, context):
+        return
     if not context.args:
         await update.message.reply_text("Usage: `/schools us`" if _is_english(update) else "Format: `/schools us`", parse_mode="Markdown")
         return
@@ -727,6 +783,14 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
     query = update.callback_query
     await query.answer()
     data = query.data or ""
+
+    if data == "membership:check":
+        if await require_channel_membership(update, context):
+            await show_main_menu(update, context, edit=True)
+        return
+
+    if not await require_channel_membership(update, context):
+        return
 
     if data == "menu:main":
         context.user_data.pop("step", None)
@@ -939,12 +1003,16 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
 
 
 async def start_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_channel_membership(update, context):
+        return
     context.user_data.clear()
     keyboard = InlineKeyboardMarkup(_format_country_list() + [[InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")]])
     await _safe_reply_text(update, _t(update, "new_document"), parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_channel_membership(update, context):
+        return
     text = update.message.text.strip()
     step = context.user_data.get("step")
     country = context.user_data.get("country")
@@ -1238,6 +1306,8 @@ async def generate_fast_command(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def generate_legacy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_channel_membership(update, context):
+        return
     if not context.args:
         await _safe_reply_text(update, "Format salah. Contoh: `/generate us John Smith \"Valley High\" \"Head of Science Department\" \"12/05/1988\" Male teacher_id,employment_letter`", parse_mode="Markdown")
         return
