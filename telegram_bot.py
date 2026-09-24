@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import random
@@ -13,7 +14,7 @@ from telegram import (
     InlineKeyboardMarkup,
     Update,
 )
-from telegram.error import TelegramError
+from telegram.error import RetryAfter, TelegramError
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -198,6 +199,57 @@ def _gemini_stock_count() -> int:
     with _db() as connection:
         row = connection.execute("SELECT COUNT(*) AS total FROM gemini_stock WHERE active = 1").fetchone()
     return int(row["total"])
+
+
+async def _broadcast_redeem_code(
+    context: ContextTypes.DEFAULT_TYPE,
+    code: str,
+    coins: int,
+    max_uses: int,
+) -> int:
+    with _db() as connection:
+        users = connection.execute("SELECT user_id, language FROM users").fetchall()
+
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🎟️ Redeem Now", callback_data="redeem:input")]]
+    )
+    sent = 0
+    for user in users:
+        if user["language"] == "en":
+            message = (
+                "*New Redeem Code Available*\n\n"
+                f"Code: `{code}`\nReward: *{coins} 🪙*\nAvailable uses: *{max_uses}*\n\n"
+                "Redeem it before the quota runs out."
+            )
+        else:
+            message = (
+                "*Redeem Code Baru Tersedia*\n\n"
+                f"Kode: `{code}`\nHadiah: *{coins} 🪙*\nBatas penggunaan: *{max_uses}*\n\n"
+                "Segera gunakan sebelum kuota habis."
+            )
+        try:
+            await context.bot.send_message(
+                chat_id=user["user_id"],
+                text=message,
+                parse_mode="Markdown",
+                reply_markup=keyboard,
+            )
+            sent += 1
+        except RetryAfter as exc:
+            await asyncio.sleep(exc.retry_after)
+            try:
+                await context.bot.send_message(
+                    chat_id=user["user_id"],
+                    text=message,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard,
+                )
+                sent += 1
+            except TelegramError as retry_error:
+                logger.info("Redeem notification skipped for user %s: %s", user["user_id"], retry_error)
+        except TelegramError as exc:
+            logger.info("Redeem notification skipped for user %s: %s", user["user_id"], exc)
+    return sent
 
 
 def _set_setting(name: str, value: int) -> None:
@@ -970,8 +1022,12 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 "INSERT INTO redeem_codes(code, coins, max_uses) VALUES (?, ?, ?) ON CONFLICT(code) DO UPDATE SET coins = excluded.coins, max_uses = excluded.max_uses, uses = 0, active = 1",
                 (code, coins, max_uses),
             )
+        notified = await _broadcast_redeem_code(context, code, coins, max_uses)
         context.user_data.pop("step", None)
-        await update.message.reply_text(f"Redeem code `{code}` aktif: {coins} coin, maksimal {max_uses} penggunaan.", parse_mode="Markdown")
+        await update.message.reply_text(
+            f"Redeem code `{code}` aktif: {coins} coin, maksimal {max_uses} penggunaan.\nNotifikasi terkirim ke {notified} user.",
+            parse_mode="Markdown",
+        )
         await show_admin_menu(update, context)
         return
 

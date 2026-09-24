@@ -264,6 +264,7 @@ A Telegram bot is also available for lightweight, on-the-go document generation.
 - Persistent coin balance and activity storage in SQLite
 - Coin transaction history with charges, rewards, refunds, and admin grants
 - Gemini Pro stock management with JIO links, descriptions, and live stock count
+- Automatic localized redeem-code announcements with a one-tap redeem button
 - Admin settings for prices, rewards, redeem codes, and manual coin grants
 
 ### Setup
