@@ -102,6 +102,21 @@ def init_database() -> None:
                 redeemed_at TEXT NOT NULL,
                 PRIMARY KEY (code, user_id)
             );
+            CREATE TABLE IF NOT EXISTS coin_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                balance_after INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS gemini_stock (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                link TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
             """
         )
         connection.executemany(
@@ -145,20 +160,44 @@ def _user_from_update(update: Update) -> sqlite3.Row | None:
     return _ensure_user(user.id, user.username or user.full_name or "")
 
 
-def _add_coins(user_id: int, amount: int) -> int:
+def _add_coins(user_id: int, amount: int, reason: str = "Manual adjustment") -> int:
     with _db() as connection:
         connection.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (amount, user_id))
         row = connection.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        connection.execute(
+            "INSERT INTO coin_transactions(user_id, amount, balance_after, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, amount, row["coins"], reason, datetime.now().isoformat()),
+        )
     return int(row["coins"])
 
 
-def _spend_coins(user_id: int, amount: int) -> bool:
+def _spend_coins(user_id: int, amount: int, reason: str = "Purchase") -> bool:
     with _db() as connection:
         cursor = connection.execute(
             "UPDATE users SET coins = coins - ? WHERE user_id = ? AND coins >= ?",
             (amount, user_id, amount),
         )
+        if cursor.rowcount == 1:
+            row = connection.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,)).fetchone()
+            connection.execute(
+                "INSERT INTO coin_transactions(user_id, amount, balance_after, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, -amount, row["coins"], reason, datetime.now().isoformat()),
+            )
     return cursor.rowcount == 1
+
+
+def _coin_history(user_id: int, limit: int = 15) -> list[sqlite3.Row]:
+    with _db() as connection:
+        return connection.execute(
+            "SELECT amount, balance_after, reason, created_at FROM coin_transactions WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+
+
+def _gemini_stock_count() -> int:
+    with _db() as connection:
+        row = connection.execute("SELECT COUNT(*) AS total FROM gemini_stock WHERE active = 1").fetchone()
+    return int(row["total"])
 
 
 def _set_setting(name: str, value: int) -> None:
@@ -336,6 +375,33 @@ def _language(update: Update) -> str:
     return row["language"] if row else "id"
 
 
+def _is_english(update: Update) -> bool:
+    return _language(update) == "en"
+
+
+_TEXT = {
+    "new_document": ("*New Document*\n\nChoose the country to use.", "*Buat Dokumen Baru*\n\nPilih negara yang akan digunakan."),
+    "choose_country": ("*Document creation*\n\nChoose a country.", "*Mulai pembuatan dokumen*\n\nPilih negara yang akan dipakai."),
+    "last_name": ("Send your *last name*.", "Silakan kirim *nama belakang* Anda."),
+    "gender": ("Choose *gender*.", "Pilih *jenis kelamin*."),
+    "school": ("Choose a *school* or type one manually.", "Pilih *sekolah* atau ketik sendiri."),
+    "position": ("Choose or send your *position*.", "Pilih atau kirim *jabatan/posisi* Anda."),
+    "dob": ("Send your *date of birth* in `DD/MM/YYYY` format.", "Kirim *tanggal lahir* dalam format `DD/MM/YYYY`."),
+    "choose_school": ("Send the *school name* you want.", "Silakan kirim *nama sekolah* yang diinginkan."),
+    "choose_position": ("Send your *position*.", "Silakan kirim *jabatan / posisi* Anda."),
+    "choose_dob": ("Send your *date of birth* in `DD/MM/YYYY` format.", "Silakan kirim *tanggal lahir* dalam format `DD/MM/YYYY`."),
+    "review": ("*Document Review*", "*Review Dokumen*"),
+    "create": ("Create Document", "Buat Dokumen"),
+    "random_again": ("Randomize Again", "Random Ulang"),
+    "edit": ("Edit Data", "Edit Data"),
+}
+
+
+def _t(update: Update, key: str) -> str:
+    english, indonesian = _TEXT[key]
+    return english if _is_english(update) else indonesian
+
+
 def _main_menu_text(update: Update) -> str:
     if _language(update) == "en":
         return "*Yowes Main Menu*\n\nChoose a service below. Your balance and activity are saved securely."
@@ -387,10 +453,14 @@ def _process_referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if not owner or owner["user_id"] == user.id:
             return
         current = connection.execute("SELECT referred_by FROM users WHERE user_id = ?", (user.id,)).fetchone()
-        if current and current["referred_by"] is None:
-            reward = _setting("referral_reward", 2)
-            connection.execute("UPDATE users SET referred_by = ? WHERE user_id = ?", (owner["user_id"], user.id))
-            connection.execute("UPDATE users SET coins = coins + ? WHERE user_id IN (?, ?)", (reward, owner["user_id"], user.id))
+        should_reward = bool(current and current["referred_by"] is None)
+        owner_id = owner["user_id"]
+    if should_reward:
+        reward = _setting("referral_reward", 2)
+        with _db() as connection:
+            connection.execute("UPDATE users SET referred_by = ? WHERE user_id = ?", (owner_id, user.id))
+        _add_coins(owner_id, reward, "Referral reward")
+        _add_coins(user.id, reward, "Referral welcome reward")
 
 
 def _make_dashboard_text() -> str:
@@ -439,7 +509,32 @@ async def show_coins(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if english
         else f"*Coin Saya*\n\nSaldo: *{user['coins']} 🪙*\n\nDapatkan coin melalui check-in harian, referral, dan redeem code."
     )
-    await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=_back_keyboard())
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📜 Histori Koin" if not english else "📜 Coin History", callback_data="account:history")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")],
+        ]
+    )
+    await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=keyboard)
+
+
+async def show_coin_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = _user_from_update(update)
+    if not user:
+        return
+    history = _coin_history(user["user_id"])
+    english = user["language"] == "en"
+    title = "*Coin History*" if english else "*Histori Koin*"
+    if not history:
+        text = f"{title}\n\n" + ("No transactions yet." if english else "Belum ada transaksi koin.")
+    else:
+        lines = []
+        for item in history:
+            sign = "+" if item["amount"] > 0 else ""
+            date = item["created_at"].replace("T", " ")[:16]
+            lines.append(f"`{date}`  {sign}{item['amount']} 🪙  · {item['reason']}  · saldo {item['balance_after']}")
+        text = f"{title}\n\n" + "\n".join(lines)
+    await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=_back_keyboard("account:coins"))
 
 
 async def show_referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -469,9 +564,11 @@ async def daily_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             message = "Check-in hari ini sudah dilakukan." if user["language"] != "en" else "Today's check-in is already completed."
             balance = user["coins"]
         else:
-            connection.execute("UPDATE users SET last_checkin = ?, coins = coins + ? WHERE user_id = ?", (today, reward, user["user_id"]))
-            balance = user["coins"] + reward
+            connection.execute("UPDATE users SET last_checkin = ? WHERE user_id = ?", (today, user["user_id"]))
+            balance = None
             message = f"Check-in berhasil. Anda mendapatkan {reward} 🪙." if user["language"] != "en" else f"Check-in complete. You received {reward} 🪙."
+    if balance is None:
+        balance = _add_coins(user["user_id"], reward, "Daily check-in")
     await _safe_edit_text(update, f"*🎁 Daily Check-in*\n\n{message}\nSaldo: *{balance} 🪙*", parse_mode="Markdown", reply_markup=_back_keyboard())
 
 
@@ -494,7 +591,7 @@ async def show_redeem_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data["step"] = REDEEM_CODE
     await _safe_edit_text(
         update,
-        "*Redeem Code*\n\nKirim kode redeem Anda melalui pesan berikutnya.",
+        "*Redeem Code*\n\nSend your redeem code in the next message." if _is_english(update) else "*Redeem Code*\n\nKirim kode redeem Anda melalui pesan berikutnya.",
         parse_mode="Markdown",
         reply_markup=_back_keyboard(),
     )
@@ -504,19 +601,27 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not _is_admin(update.effective_user.id if update.effective_user else None):
         await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard())
         return
-    text = (
-        f"*Admin Settings*\n\n"
-        f"Harga Canva Doc: {_setting('doc_price', 3)} 🪙\n"
-        f"Harga Gemini Pro: {_setting('gemini_price', 20)} 🪙\n"
-        f"Reward check-in: {_setting('checkin_reward', 1)} 🪙\n"
-        f"Reward referral: {_setting('referral_reward', 2)} 🪙"
-    )
+    if _is_english(update):
+        text = (
+            f"*Admin Settings*\n\nCanva Doc price: {_setting('doc_price', 3)} 🪙\n"
+            f"Gemini Pro price: {_setting('gemini_price', 20)} 🪙\n"
+            f"Check-in reward: {_setting('checkin_reward', 1)} 🪙\n"
+            f"Referral reward: {_setting('referral_reward', 2)} 🪙"
+        )
+    else:
+        text = (
+            f"*Admin Settings*\n\nHarga Canva Doc: {_setting('doc_price', 3)} 🪙\n"
+            f"Harga Gemini Pro: {_setting('gemini_price', 20)} 🪙\n"
+            f"Reward check-in: {_setting('checkin_reward', 1)} 🪙\n"
+            f"Reward referral: {_setting('referral_reward', 2)} 🪙"
+        )
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("💰 Atur Harga", callback_data="admin:prices")],
-            [InlineKeyboardButton("🎟️ Buat Redeem Code", callback_data="admin:redeem")],
-            [InlineKeyboardButton("➕ Tambah Coin User", callback_data="admin:addcoins")],
-            [InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")],
+            [InlineKeyboardButton("💰 Set Prices" if _is_english(update) else "💰 Atur Harga", callback_data="admin:prices")],
+            [InlineKeyboardButton("🎟️ Create Redeem Code" if _is_english(update) else "🎟️ Buat Redeem Code", callback_data="admin:redeem")],
+            [InlineKeyboardButton("➕ Grant User Coins" if _is_english(update) else "➕ Tambah Coin User", callback_data="admin:addcoins")],
+            [InlineKeyboardButton("📦 Manage Gemini Stock" if _is_english(update) else "📦 Kelola Stok Gemini", callback_data="admin:stock")],
+            [InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="menu:main")],
         ]
     )
     await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=keyboard)
@@ -528,9 +633,15 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
         await start_wizard(update, context)
         return
     price = _setting("gemini_price", 20)
+    stock = _gemini_stock_count()
+    english = _language(update) == "en"
     await _safe_edit_text(
         update,
-        f"*Gemini Pro 18 Bulan*\n\nHarga: *{price} 🪙*\n\nProduk tersedia melalui admin. Hubungi admin untuk proses aktivasi akun Anda.",
+        (
+            f"*Gemini Pro 18 Months*\n\nPrice: *{price} 🪙*\nStock available: *{stock}*\n\nContact admin for activation."
+            if english
+            else f"*Gemini Pro 18 Bulan*\n\nHarga: *{price} 🪙*\nStok tersedia: *{stock}*\n\nHubungi admin untuk proses aktivasi akun."
+        ),
         parse_mode="Markdown",
         reply_markup=_back_keyboard(),
     )
@@ -573,6 +684,10 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         await show_coins(update, context)
         return
 
+    if data == "account:history":
+        await show_coin_history(update, context)
+        return
+
     if data == "referral:menu":
         await show_referral(update, context)
         return
@@ -607,7 +722,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         context.user_data["step"] = "admin_prices"
         await _safe_edit_text(
             update,
-            "Kirim format: `doc_price gemini_price checkin_reward referral_reward`\nContoh: `3 20 1 2`",
+            "Send: `doc_price gemini_price checkin_reward referral_reward`\nExample: `3 20 1 2`" if _is_english(update) else "Kirim format: `doc_price gemini_price checkin_reward referral_reward`\nContoh: `3 20 1 2`",
             parse_mode="Markdown",
             reply_markup=_back_keyboard("admin:menu"),
         )
@@ -617,7 +732,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         context.user_data["step"] = "admin_redeem"
         await _safe_edit_text(
             update,
-            "Kirim format: `KODE JUMLAH_COIN MAKS_PAKAI`\nContoh: `WELCOME50 50 100`",
+            "Send: `CODE COINS MAX_USES`\nExample: `WELCOME50 50 100`" if _is_english(update) else "Kirim format: `KODE JUMLAH_COIN MAKS_PAKAI`\nContoh: `WELCOME50 50 100`",
             parse_mode="Markdown",
             reply_markup=_back_keyboard("admin:menu"),
         )
@@ -627,16 +742,52 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         context.user_data["step"] = ADMIN_ADD_COINS
         await _safe_edit_text(
             update,
-            "Kirim format: `USER_ID JUMLAH_COIN`\nContoh: `123456789 10`",
+            "Send: `USER_ID COINS`\nExample: `123456789 10`" if _is_english(update) else "Kirim format: `USER_ID JUMLAH_COIN`\nContoh: `123456789 10`",
             parse_mode="Markdown",
             reply_markup=_back_keyboard("admin:menu"),
+        )
+        return
+
+    if data == "admin:stock":
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
+            return
+        with _db() as connection:
+            stock = connection.execute(
+                "SELECT id, link, description FROM gemini_stock WHERE active = 1 ORDER BY id DESC LIMIT 10"
+            ).fetchall()
+        if stock:
+            lines = [f"• #{item['id']} — {item['description']}\n  {item['link']}" for item in stock]
+            title = "Active Gemini Stock" if _is_english(update) else "Stok Gemini Aktif"
+            text = f"*{title}: {_gemini_stock_count()}*\n\n" + "\n".join(lines)
+        else:
+            text = "*Active Gemini Stock: 0*\n\nNo stock available." if _is_english(update) else "*Stok Gemini Aktif: 0*\n\nBelum ada stok."
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("➕ Add Stock" if _is_english(update) else "➕ Tambah Stok", callback_data="admin:addstock")],
+                [InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="admin:menu")],
+            ]
+        )
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=keyboard)
+        return
+
+    if data == "admin:addstock":
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:stock"))
+            return
+        context.user_data["step"] = "admin_stock"
+        await _safe_edit_text(
+            update,
+            "Send one stock item per message:\n`JIO_LINK | DESCRIPTION`\n\nExample:\n`https://jio.example/item-001 | Gemini Pro 18 months - personal account`" if _is_english(update) else "Kirim satu stok per pesan dengan format:\n`LINK_JIO | DESKRIPSI`\n\nContoh:\n`https://jio.example/item-001 | Gemini Pro 18 bulan - akun personal`",
+            parse_mode="Markdown",
+            reply_markup=_back_keyboard("admin:stock"),
         )
         return
 
     if data == "new:document":
         context.user_data.clear()
         keyboard = InlineKeyboardMarkup(_format_country_list() + [[InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")]])
-        await _safe_edit_text(update, "*Mulai pembuatan dokumen*\n\nPilih negara yang akan dipakai.", parse_mode="Markdown", reply_markup=keyboard)
+        await _safe_edit_text(update, _t(update, "choose_country"), parse_mode="Markdown", reply_markup=keyboard)
         return
 
     if data == "menu:countries":
@@ -668,15 +819,19 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         _apply_random_defaults(context, country)
         gen = get_country(country)()
         keyboard = InlineKeyboardMarkup(_format_doc_type_buttons(country))
+        english = _is_english(update)
         await _safe_edit_text(
             update,
-            f"*Negara dipilih:* {get_country_display(country)}\n\n"
-            "Berikut data otomatis yang sudah diisi untuk Anda.\n"
-            f"Nama: {context.user_data['first_name']} {context.user_data['last_name']}\n"
-            f"Sekolah: {context.user_data['school']}\n"
-            f"Posisi: {context.user_data['position']}\n"
-            f"Tanggal lahir: {context.user_data['dob']}\n\n"
-            "Pilih tipe dokumen yang akan dibuat.",
+            (
+                f"*Selected country:* {get_country_display(country)}\n\nYour data has been filled automatically.\n"
+                f"Name: {context.user_data['first_name']} {context.user_data['last_name']}\n"
+                f"School: {context.user_data['school']}\nPosition: {context.user_data['position']}\n"
+                f"Date of birth: {context.user_data['dob']}\n\nChoose a document type."
+                if english
+                else f"*Negara dipilih:* {get_country_display(country)}\n\nBerikut data otomatis yang sudah diisi untuk Anda.\n"
+                f"Nama: {context.user_data['first_name']} {context.user_data['last_name']}\nSekolah: {context.user_data['school']}\n"
+                f"Posisi: {context.user_data['position']}\nTanggal lahir: {context.user_data['dob']}\n\nPilih tipe dokumen yang akan dibuat."
+            ),
             parse_mode="Markdown",
             reply_markup=keyboard,
         )
@@ -698,22 +853,22 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
     if data.startswith("school:"):
         school_value = data.split(":", 1)[1]
         if school_value == "manual":
-            await query.edit_message_text("Ketik nama sekolah secara manual.", parse_mode="Markdown")
+            await query.edit_message_text("Type the school name manually." if _is_english(update) else "Ketik nama sekolah secara manual.", parse_mode="Markdown")
             context.user_data["step"] = SCHOOL
             return
         context.user_data["school"] = school_value
-        await _safe_edit_text(update, "Silakan kirim *jabatan / posisi* Anda.", parse_mode="Markdown")
+        await _safe_edit_text(update, _t(update, "choose_position"), parse_mode="Markdown")
         context.user_data["step"] = POSITION
         return
 
     if data.startswith("position:"):
         position_value = data.split(":", 1)[1]
         if position_value == "manual":
-            await query.edit_message_text("Ketik jabatan Anda secara manual.", parse_mode="Markdown")
+            await query.edit_message_text("Type your position manually." if _is_english(update) else "Ketik jabatan Anda secara manual.", parse_mode="Markdown")
             context.user_data["step"] = POSITION
             return
         context.user_data["position"] = position_value
-        await _safe_edit_text(update, "Silakan kirim *tanggal lahir* dalam format `DD/MM/YYYY`.", parse_mode="Markdown")
+        await _safe_edit_text(update, _t(update, "choose_dob"), parse_mode="Markdown")
         context.user_data["step"] = DOB
         return
 
@@ -729,7 +884,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
 async def start_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
     keyboard = InlineKeyboardMarkup(_format_country_list() + [[InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")]])
-    await _safe_reply_text(update, "*Buat Dokumen Baru*\n\nPilih negara yang akan digunakan.", parse_mode="Markdown", reply_markup=keyboard)
+    await _safe_reply_text(update, _t(update, "new_document"), parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -754,12 +909,33 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 await update.message.reply_text("Kode tidak valid, sudah habis, atau sudah pernah digunakan.", reply_markup=_back_keyboard())
                 context.user_data.pop("step", None)
                 return
+            reward_coins = reward["coins"]
             connection.execute("INSERT INTO redemptions(code, user_id, redeemed_at) VALUES (?, ?, ?)", (code, user["user_id"], datetime.now().isoformat()))
             connection.execute("UPDATE redeem_codes SET uses = uses + 1 WHERE code = ?", (code,))
-            connection.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (reward["coins"], user["user_id"]))
+        balance = _add_coins(user["user_id"], reward_coins, f"Redeem code {code}")
         context.user_data.pop("step", None)
         await update.message.reply_text(f"Redeem berhasil. Anda mendapatkan *{reward['coins']} 🪙*.", parse_mode="Markdown")
         await show_main_menu(update, context)
+        return
+
+    if step == "admin_stock":
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            return
+        if "|" not in text:
+            await update.message.reply_text("Format tidak valid. Gunakan: `LINK_JIO | DESKRIPSI`", parse_mode="Markdown")
+            return
+        link, description = (part.strip() for part in text.split("|", 1))
+        if not link.startswith(("https://", "http://")) or not description:
+            await update.message.reply_text("Link harus diawali http:// atau https:// dan deskripsi wajib diisi.")
+            return
+        with _db() as connection:
+            connection.execute(
+                "INSERT INTO gemini_stock(link, description, created_at) VALUES (?, ?, ?)",
+                (link, description, datetime.now().isoformat()),
+            )
+        context.user_data.pop("step", None)
+        await update.message.reply_text(f"Stok Gemini berhasil ditambahkan. Total stok aktif: *{_gemini_stock_count()}*.", parse_mode="Markdown")
+        await show_admin_menu(update, context)
         return
 
     if step == "admin_prices":
@@ -803,7 +979,7 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
         target_id, amount = int(match.group(1)), int(match.group(2))
         _ensure_user(target_id)
-        balance = _add_coins(target_id, amount)
+        balance = _add_coins(target_id, amount, "Admin coin grant")
         context.user_data.pop("step", None)
         await update.message.reply_text(f"Berhasil menambahkan {amount} 🪙 ke user `{target_id}`. Saldo sekarang: {balance} 🪙.", parse_mode="Markdown")
         await show_admin_menu(update, context)
@@ -811,14 +987,14 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if step == FIRST_NAME:
         context.user_data["first_name"] = text
-        await update.message.reply_text("Silakan kirim *nama belakang* Anda.", parse_mode="Markdown")
+        await update.message.reply_text(_t(update, "last_name"), parse_mode="Markdown")
         context.user_data["step"] = LAST_NAME
         return
 
     if step == LAST_NAME:
         context.user_data["last_name"] = text
         keyboard = InlineKeyboardMarkup(_format_gender_buttons())
-        await update.message.reply_text("Pilih *jenis kelamin*.", parse_mode="Markdown", reply_markup=keyboard)
+        await update.message.reply_text(_t(update, "gender"), parse_mode="Markdown", reply_markup=keyboard)
         context.user_data["step"] = GENDER
         return
 
@@ -826,7 +1002,7 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         context.user_data["gender"] = text.title()
         if country:
             school_buttons = InlineKeyboardMarkup(_format_school_buttons(country))
-            await update.message.reply_text("Pilih *sekolah* atau ketik sendiri.", parse_mode="Markdown", reply_markup=school_buttons)
+            await update.message.reply_text(_t(update, "school"), parse_mode="Markdown", reply_markup=school_buttons)
         else:
             await update.message.reply_text("Silakan pilih negara terlebih dahulu.")
         context.user_data["step"] = SCHOOL
@@ -836,7 +1012,7 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         context.user_data["school"] = text
         if country:
             position_buttons = InlineKeyboardMarkup(_format_position_buttons(country))
-            await update.message.reply_text("Pilih atau kirim *jabatan/posisi* Anda.", parse_mode="Markdown", reply_markup=position_buttons)
+            await update.message.reply_text(_t(update, "position"), parse_mode="Markdown", reply_markup=position_buttons)
         else:
             await update.message.reply_text("Silakan pilih negara terlebih dahulu.")
         context.user_data["step"] = POSITION
@@ -844,7 +1020,7 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if step == POSITION:
         context.user_data["position"] = text
-        await update.message.reply_text("Kirim *tanggal lahir* dalam format `DD/MM/YYYY`.", parse_mode="Markdown")
+        await update.message.reply_text(_t(update, "dob"), parse_mode="Markdown")
         context.user_data["step"] = DOB
         return
 
@@ -872,21 +1048,20 @@ async def confirm_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     summary = (
-        "*Review Dokumen*\n\n"
-        f"• Negara: {get_country_display(country)}\n"
-        f"• Tipe Dokumen: {payload.get('document_type', 'all')}\n"
-        f"• Nama: {payload.get('first_name', '')} {payload.get('last_name', '')}\n"
-        f"• Gender: {payload.get('gender', 'Random')}\n"
-        f"• Sekolah: {payload.get('school', '-')}\n"
-        f"• Posisi: {payload.get('position', '-')}\n"
-        f"• Tanggal Lahir: {payload.get('dob', '-')}"
+        f"{_t(update, 'review')}\n\n• Country: {get_country_display(country)}\n• Document type: {payload.get('document_type', 'all')}\n"
+        f"• Name: {payload.get('first_name', '')} {payload.get('last_name', '')}\n• Gender: {payload.get('gender', 'Random')}\n"
+        f"• School: {payload.get('school', '-')}\n• Position: {payload.get('position', '-')}\n• Date of birth: {payload.get('dob', '-')}"
+        if _is_english(update)
+        else f"{_t(update, 'review')}\n\n• Negara: {get_country_display(country)}\n• Tipe Dokumen: {payload.get('document_type', 'all')}\n"
+        f"• Nama: {payload.get('first_name', '')} {payload.get('last_name', '')}\n• Gender: {payload.get('gender', 'Random')}\n"
+        f"• Sekolah: {payload.get('school', '-')}\n• Posisi: {payload.get('position', '-')}\n• Tanggal Lahir: {payload.get('dob', '-')}"
     )
 
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("✅ Buat Dokumen", callback_data="confirm:generate")],
-            [InlineKeyboardButton("🎲 Random Ulang", callback_data="action:randomize")],
-            [InlineKeyboardButton("✏️ Edit Data", callback_data="confirm:edit")],
+            [InlineKeyboardButton(f"✅ {_t(update, 'create')}", callback_data="confirm:generate")],
+            [InlineKeyboardButton(f"🎲 {_t(update, 'random_again')}", callback_data="action:randomize")],
+            [InlineKeyboardButton(f"✏️ {_t(update, 'edit')}", callback_data="confirm:edit")],
         ]
     )
     await _safe_reply_text(update, summary, parse_mode="Markdown", reply_markup=keyboard)
@@ -907,10 +1082,14 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
 
     user = _user_from_update(update)
     price = _setting("doc_price", 3)
-    if not user or not _spend_coins(user["user_id"], price):
+    if not user or not _spend_coins(user["user_id"], price, "Canva Doc Education generate"):
         await _safe_reply_text(
             update,
-            f"Saldo tidak cukup. Pembuatan dokumen membutuhkan *{price} 🪙*. Silakan check-in, gunakan referral, atau redeem code.",
+            (
+                f"Insufficient balance. Document generation requires *{price} 🪙*. Use daily check-in, referrals, or a redeem code."
+                if _is_english(update)
+                else f"Saldo tidak cukup. Pembuatan dokumen membutuhkan *{price} 🪙*. Silakan check-in, gunakan referral, atau redeem code."
+            ),
             parse_mode="Markdown",
             reply_markup=_back_keyboard(),
         )
@@ -929,43 +1108,46 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
             output_dir="output/telegram",
         )
     except ValueError as exc:
-        _add_coins(user["user_id"], price)
+        _add_coins(user["user_id"], price, "Document generation refund")
         message = str(exc)
         if "not found for" in message.lower() or "school" in message.lower():
             user_message = (
-                "Maaf, sekolah yang Anda masukkan tidak ditemukan. "
-                "Silakan pilih sekolah dari daftar yang tersedia atau ketik nama yang lebih mirip."
+                "The school was not found. Choose one from the available list or enter a closer name."
+                if _is_english(update)
+                else "Maaf, sekolah yang Anda masukkan tidak ditemukan. Silakan pilih sekolah dari daftar yang tersedia atau ketik nama yang lebih mirip."
             )
         elif "document type" in message.lower():
-            user_message = f"Tipe dokumen tidak sesuai dengan negara yang dipilih.\n\nDetail: {message}"
+            user_message = f"The document type is not available for this country.\n\nDetails: {message}" if _is_english(update) else f"Tipe dokumen tidak sesuai dengan negara yang dipilih.\n\nDetail: {message}"
         else:
             user_message = (
-                "Maaf, dokumen tidak dapat dibuat untuk saat ini. "
-                "Silakan periksa data yang Anda masukkan dan coba lagi."
+                "The document could not be created. Check your data and try again."
+                if _is_english(update)
+                else "Maaf, dokumen tidak dapat dibuat untuk saat ini. Silakan periksa data yang Anda masukkan dan coba lagi."
             )
         await _safe_reply_text(update, user_message, parse_mode="Markdown")
         return
     except Exception as exc:
-        _add_coins(user["user_id"], price)
+        _add_coins(user["user_id"], price, "Document generation refund")
         logger.exception("Unexpected document generation failure")
         await _safe_reply_text(
             update,
-            "Terjadi kesalahan internal saat membuat dokumen. Data Anda belum hilang; silakan coba lagi atau pilih Dashboard.",
+            "An internal error occurred while creating the document. Your data is preserved; please try again or return to the dashboard."
+            if _is_english(update)
+            else "Terjadi kesalahan internal saat membuat dokumen. Data Anda belum hilang; silakan coba lagi atau pilih Dashboard.",
         )
         return
 
     files = result.get("files", [])
     if not files:
-        _add_coins(user["user_id"], price)
-        await _safe_reply_text(update, "Tidak ada file yang berhasil dibuat.")
+        _add_coins(user["user_id"], price, "Document generation refund")
+        await _safe_reply_text(update, "No document files were created." if _is_english(update) else "Tidak ada file yang berhasil dibuat.")
         return
 
     summary = (
-        f"*Dokumen selesai dibuat*\n\n"
-        f"• Negara: {result['country']}\n"
-        f"• Sekolah: {result['school']}\n"
-        f"• Tipe: {', '.join(result['document_types'])}\n"
-        f"• Total file: {result['count']}"
+        f"*Documents created successfully*\n\n• Country: {result['country']}\n• School: {result['school']}\n"
+        f"• Types: {', '.join(result['document_types'])}\n• Files: {result['count']}"
+        if _is_english(update)
+        else f"*Dokumen selesai dibuat*\n\n• Negara: {result['country']}\n• Sekolah: {result['school']}\n• Tipe: {', '.join(result['document_types'])}\n• Total file: {result['count']}"
     )
     next_actions = InlineKeyboardMarkup(
         [
@@ -1034,7 +1216,7 @@ async def generate_legacy(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         user = _user_from_update(update)
         price = _setting("doc_price", 3)
-        if not user or not _spend_coins(user["user_id"], price):
+        if not user or not _spend_coins(user["user_id"], price, "Canva Doc Education generate"):
             await _safe_reply_text(
                 update,
                 f"Saldo tidak cukup. Pembuatan dokumen membutuhkan *{price} 🪙*.",
@@ -1056,14 +1238,14 @@ async def generate_legacy(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             output_dir="output/telegram",
         )
     except Exception as exc:
-        _add_coins(user["user_id"], price)
+        _add_coins(user["user_id"], price, "Document generation refund")
         logger.exception("Legacy generate failed")
         await _safe_reply_text(update, f"Gagal menghasilkan dokumen: {exc}")
         return
 
     files = result.get("files", [])
     if not files:
-        _add_coins(user["user_id"], price)
+        _add_coins(user["user_id"], price, "Document generation refund")
         await _safe_reply_text(update, "Tidak ada file yang dibuat.")
         return
 

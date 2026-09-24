@@ -262,6 +262,8 @@ A Telegram bot is also available for lightweight, on-the-go document generation.
 - Supports `Random`, `Male`, and `Female` profile selection
 - Main menu with Canva Doc Education, Gemini Pro, wallet, referral, daily check-in, language, and redeem-code actions
 - Persistent coin balance and activity storage in SQLite
+- Coin transaction history with charges, rewards, refunds, and admin grants
+- Gemini Pro stock management with JIO links, descriptions, and live stock count
 - Admin settings for prices, rewards, redeem codes, and manual coin grants
 
 ### Setup
