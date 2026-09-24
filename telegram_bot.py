@@ -306,14 +306,14 @@ def _format_doc_type_buttons(country_code: str) -> list[list[InlineKeyboardButto
     return buttons
 
 
-def _format_school_buttons(country_code: str, limit=8):
+def _format_school_buttons(country_code: str, limit=8, english: bool = False):
     gen = get_country(country_code)()
     schools = gen.schools[:limit]
     buttons = [
         [InlineKeyboardButton(school["name"], callback_data=f"school:{school['name']}")]
         for school in schools
     ]
-    buttons.append([InlineKeyboardButton("✍️ Ketik sendiri", callback_data="school:manual")])
+    buttons.append([InlineKeyboardButton("✍️ Type manually" if english else "✍️ Ketik sendiri", callback_data="school:manual")])
     return buttons
 
 
@@ -325,13 +325,13 @@ def _format_gender_buttons() -> list[list[InlineKeyboardButton]]:
     ]
 
 
-def _format_position_buttons(country_code: str) -> list[list[InlineKeyboardButton]]:
+def _format_position_buttons(country_code: str, english: bool = False) -> list[list[InlineKeyboardButton]]:
     gen = get_country(country_code)()
     positions = gen.get_positions()
     buttons = []
     for pos in positions[:8]:
         buttons.append([InlineKeyboardButton(pos, callback_data=f"position:{pos}")])
-    buttons.append([InlineKeyboardButton("✍️ Ketik sendiri", callback_data="position:manual")])
+    buttons.append([InlineKeyboardButton("✍️ Type manually" if english else "✍️ Ketik sendiri", callback_data="position:manual")])
     return buttons
 
 
@@ -477,6 +477,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     help_text = (
+        "*Quick guide*\n\n1. Press *Canva Doc Education*\n2. Choose a country\n3. Choose a document type\n4. Complete the profile data\n5. Confirm and receive your PNG files\n\n"
+        "*Quick command*\n`/generate us John Smith \"Valley High\" \"Head of Science Department\" \"12/05/1988\" Male teacher_id,employment_letter`\n\nGender: `Random`, `Male`, `Female`"
+        if _is_english(update)
+        else
         "*Panduan cepat*\n\n"
         "1. Tekan *Buat Dokumen Baru*\n"
         "2. Pilih negara\n"
@@ -495,7 +499,8 @@ async def countries(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for code in list_countries():
         gen = get_country(code)()
         lines.append(f"• *{code.upper()}* — {gen.get_country_name()} ({', '.join(gen.get_document_types())})")
-    await _safe_reply_text(update, "*Negara yang didukung*\n\n" + "\n".join(lines), parse_mode="Markdown")
+    title = "*Supported countries*" if _is_english(update) else "*Negara yang didukung*"
+    await _safe_reply_text(update, title + "\n\n" + "\n".join(lines), parse_mode="Markdown")
 
 
 async def show_coins(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -649,20 +654,20 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
 
 async def schools(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
-        await update.message.reply_text("Format: `/schools us`", parse_mode="Markdown")
+        await update.message.reply_text("Usage: `/schools us`" if _is_english(update) else "Format: `/schools us`", parse_mode="Markdown")
         return
 
     country = context.args[0].lower()
     try:
         gen = get_country(country)()
     except ValueError:
-        await update.message.reply_text(f"Negara `{country}` tidak tersedia.", parse_mode="Markdown")
+        await update.message.reply_text(f"Country `{country}` is not available." if _is_english(update) else f"Negara `{country}` tidak tersedia.", parse_mode="Markdown")
         return
 
     items = [f"• {school['name']}" for school in gen.schools[:20]]
-    text = f"*Sekolah untuk {gen.get_country_name()}*\n\n" + "\n".join(items)
+    text = (f"*Schools for {gen.get_country_name()}*" if _is_english(update) else f"*Sekolah untuk {gen.get_country_name()}*") + "\n\n" + "\n".join(items)
     if len(gen.schools) > 20:
-        text += f"\n\n… dan {len(gen.schools) - 20} sekolah lainnya."
+        text += f"\n\n… and {len(gen.schools) - 20} more schools." if _is_english(update) else f"\n\n… dan {len(gen.schools) - 20} sekolah lainnya."
     await _safe_reply_text(update, text, parse_mode="Markdown")
 
 
@@ -1001,7 +1006,7 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if step == GENDER:
         context.user_data["gender"] = text.title()
         if country:
-            school_buttons = InlineKeyboardMarkup(_format_school_buttons(country))
+            school_buttons = InlineKeyboardMarkup(_format_school_buttons(country, english=_is_english(update)))
             await update.message.reply_text(_t(update, "school"), parse_mode="Markdown", reply_markup=school_buttons)
         else:
             await update.message.reply_text("Silakan pilih negara terlebih dahulu.")
@@ -1011,7 +1016,7 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if step == SCHOOL:
         context.user_data["school"] = text
         if country:
-            position_buttons = InlineKeyboardMarkup(_format_position_buttons(country))
+            position_buttons = InlineKeyboardMarkup(_format_position_buttons(country, english=_is_english(update)))
             await update.message.reply_text(_t(update, "position"), parse_mode="Markdown", reply_markup=position_buttons)
         else:
             await update.message.reply_text("Silakan pilih negara terlebih dahulu.")
