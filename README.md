@@ -321,6 +321,19 @@ On first use, every user must open `https://t.me/canvaproteam04`, join the chann
 /generate us John Smith "Valley High" "Head of Science Department" "12/05/1988" Male teacher_id,employment_letter
 ```
 
+### BotFather command list
+
+Paste the following commands into **BotFather → Edit Bot → Edit Commands**:
+
+```text
+start - Open the main menu and access all bot features
+new - Start a new Canva education document
+help - Show the bot usage guide and command examples
+countries - List all supported countries and document types
+schools - List schools for a country, for example /schools us
+generate - Generate documents with the quick command format
+```
+
 ### Notes
 
 - The bot generates PNG files in `output/telegram/`.
