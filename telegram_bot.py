@@ -356,8 +356,21 @@ def _format_doc_type_buttons(country_code: str) -> list[list[InlineKeyboardButto
     types = ["all"] + gen.get_document_types()
     buttons = []
     for doc in types:
-        buttons.append([InlineKeyboardButton(doc.upper(), callback_data=f"doc:{doc}")])
+        label = "ALL DOCUMENTS" if doc == "all" else doc.replace("_", " ").title()
+        buttons.append([InlineKeyboardButton(label, callback_data=f"doc:{doc}")])
     return buttons
+
+
+def _normalize_document_type(value: str, supported_types: list[str]) -> str | None:
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "teacher_id": "teacher_id",
+        "teaching_id": "teaching_id",
+        "teaching_license": "teaching_license",
+        "employment_letter": "employment_letter",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in supported_types else None
 
 
 def _format_school_buttons(country_code: str, limit=8, english: bool = False):
@@ -960,7 +973,17 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
 
     if data.startswith("doc:"):
         doc_type = data.split(":", 1)[1]
-        context.user_data["document_type"] = doc_type
+        country = context.user_data.get("country")
+        supported = get_country(country)().get_document_types() if country else []
+        normalized = "all" if doc_type == "all" else _normalize_document_type(doc_type, supported)
+        if normalized is None:
+            await _safe_reply_text(
+                update,
+                "This document type is not available for the selected country." if _is_english(update) else "Tipe dokumen ini tidak tersedia untuk negara yang dipilih.",
+                reply_markup=_back_keyboard("menu:main"),
+            )
+            return
+        context.user_data["document_type"] = normalized
         await confirm_data(update, context)
         return
 
@@ -1209,6 +1232,18 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
         await _safe_reply_text(update, f"Data belum lengkap: {', '.join(missing)}")
         return
 
+    selected_type = payload.get("document_type")
+    if selected_type not in (None, "all"):
+        supported_types = get_country(country)().get_document_types()
+        selected_type = _normalize_document_type(selected_type, supported_types)
+        if selected_type is None:
+            await _safe_reply_text(
+                update,
+                "The selected document type is not available for this country." if _is_english(update) else "Tipe dokumen yang dipilih tidak tersedia untuk negara ini.",
+                reply_markup=_back_keyboard("menu:main"),
+            )
+            return
+
     user = _user_from_update(update)
     price = _setting("doc_price", 3)
     if not user or not _spend_coins(user["user_id"], price, "Canva Doc Education generate"):
@@ -1233,7 +1268,7 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
             position=payload["position"],
             date_of_birth=payload["dob"],
             gender=payload.get("gender", "Random"),
-            document_types=(None if payload.get("document_type") in (None, "all") else [payload["document_type"]]),
+            document_types=(None if selected_type in (None, "all") else [selected_type]),
             output_dir="output/telegram",
         )
     except ValueError as exc:

@@ -87,6 +87,14 @@ def generate_documents(
     if "all" in types:
         types = gen.get_document_types()
 
+    supported_types = gen.get_document_types()
+    invalid_types = [doc_type for doc_type in types if doc_type not in supported_types]
+    if invalid_types:
+        raise ValueError(
+            f"Unsupported document type(s) for '{country}': {', '.join(invalid_types)}. "
+            f"Available types: {', '.join(supported_types)}."
+        )
+
     # Consistent photo per person (same mechanism as the GUI)
     gen._current_person_id = f"{first_name}_{last_name}".lower()
     gen._current_gender = gender
