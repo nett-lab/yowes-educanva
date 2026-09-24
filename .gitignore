@@ -13,6 +13,7 @@ venv/
 
 # Runtime generated documents
 output/
+data/
 *.rar
 
 # Environment / secrets

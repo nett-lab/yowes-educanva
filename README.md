@@ -260,6 +260,9 @@ A Telegram bot is also available for lightweight, on-the-go document generation.
 - `/generate <country> <first_name> <last_name> <school> <position> <dob> [gender] [docs]` - generate one or more documents and send PNG files back to Telegram
 - Auto-send generated PNG files directly to the chat
 - Supports `Random`, `Male`, and `Female` profile selection
+- Main menu with Canva Doc Education, Gemini Pro, wallet, referral, daily check-in, language, and redeem-code actions
+- Persistent coin balance and activity storage in SQLite
+- Admin settings for prices, rewards, redeem codes, and manual coin grants
 
 ### Setup
 
@@ -274,7 +277,10 @@ Then edit `.env` and replace the placeholder value:
 
 ```env
 BOT_TOKEN=your_bot_token_here
+ADMIN_IDS=123456789
 ```
+
+`ADMIN_IDS` is a comma-separated list of Telegram numeric user IDs allowed to open **Admin Settings**. Use your own Telegram ID; never use a username or share the bot token.
 
 Or set it directly in the environment:
 

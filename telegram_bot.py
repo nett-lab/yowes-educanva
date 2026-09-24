@@ -1,7 +1,10 @@
 import logging
 import os
 import random
+import re
+import secrets
 import shlex
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +30,9 @@ from mcp_server import generate_documents
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "output" / "telegram"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DATABASE_PATH = DATA_DIR / "bot.sqlite3"
 
 COUNTRY_LABELS = {
     "uk": "🇬🇧 United Kingdom",
@@ -55,6 +61,115 @@ COUNTRY_LABELS = {
     DOB,
     CONFIRM,
 ) = range(9)
+
+REDEEM_CODE = 20
+ADMIN_ADD_COINS = 21
+
+
+def _db() -> sqlite3.Connection:
+    connection = sqlite3.connect(DATABASE_PATH)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def init_database() -> None:
+    with _db() as connection:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL DEFAULT '',
+                language TEXT NOT NULL DEFAULT 'id',
+                coins INTEGER NOT NULL DEFAULT 0,
+                referral_code TEXT NOT NULL UNIQUE,
+                referred_by INTEGER,
+                last_checkin TEXT
+            );
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS redeem_codes (
+                code TEXT PRIMARY KEY,
+                coins INTEGER NOT NULL,
+                max_uses INTEGER NOT NULL DEFAULT 1,
+                uses INTEGER NOT NULL DEFAULT 0,
+                active INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE IF NOT EXISTS redemptions (
+                code TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                redeemed_at TEXT NOT NULL,
+                PRIMARY KEY (code, user_id)
+            );
+            """
+        )
+        connection.executemany(
+            "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",
+            [("doc_price", "3"), ("gemini_price", "20"), ("checkin_reward", "1"), ("referral_reward", "2")],
+        )
+
+
+def _admin_ids() -> set[int]:
+    raw = os.getenv("ADMIN_IDS", os.getenv("ADMIN_USER_ID", ""))
+    return {int(value.strip()) for value in raw.split(",") if value.strip().isdigit()}
+
+
+def _is_admin(user_id: int | None) -> bool:
+    return user_id is not None and user_id in _admin_ids()
+
+
+def _setting(name: str, default: int) -> int:
+    with _db() as connection:
+        row = connection.execute("SELECT value FROM settings WHERE key = ?", (name,)).fetchone()
+    try:
+        return int(row["value"]) if row else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _ensure_user(user_id: int, username: str = "") -> sqlite3.Row:
+    with _db() as connection:
+        connection.execute(
+            "INSERT OR IGNORE INTO users(user_id, username, referral_code) VALUES (?, ?, ?)",
+            (user_id, username, secrets.token_urlsafe(6).upper()),
+        )
+        connection.execute("UPDATE users SET username = ? WHERE user_id = ?", (username, user_id))
+        return connection.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+
+
+def _user_from_update(update: Update) -> sqlite3.Row | None:
+    user = update.effective_user
+    if user is None:
+        return None
+    return _ensure_user(user.id, user.username or user.full_name or "")
+
+
+def _add_coins(user_id: int, amount: int) -> int:
+    with _db() as connection:
+        connection.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (amount, user_id))
+        row = connection.execute("SELECT coins FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    return int(row["coins"])
+
+
+def _spend_coins(user_id: int, amount: int) -> bool:
+    with _db() as connection:
+        cursor = connection.execute(
+            "UPDATE users SET coins = coins - ? WHERE user_id = ? AND coins >= ?",
+            (amount, user_id, amount),
+        )
+    return cursor.rowcount == 1
+
+
+def _set_setting(name: str, value: int) -> None:
+    with _db() as connection:
+        connection.execute(
+            "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (name, str(value)),
+        )
+
+
+init_database()
 
 
 def load_env_file() -> None:
@@ -216,6 +331,68 @@ def _apply_random_defaults(context: ContextTypes.DEFAULT_TYPE, country_code: str
     context.user_data["document_type"] = "all"
 
 
+def _language(update: Update) -> str:
+    row = _user_from_update(update)
+    return row["language"] if row else "id"
+
+
+def _main_menu_text(update: Update) -> str:
+    if _language(update) == "en":
+        return "*Yowes Main Menu*\n\nChoose a service below. Your balance and activity are saved securely."
+    return "*Menu Utama Yowes*\n\nPilih layanan di bawah. Saldo dan aktivitas Anda tersimpan dengan aman."
+
+
+def _main_menu_keyboard(update: Update) -> InlineKeyboardMarkup:
+    english = _language(update) == "en"
+    doc_price = _setting("doc_price", 3)
+    gemini_price = _setting("gemini_price", 20)
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(f"🎓 Canva Doc Education · {doc_price} 🪙", callback_data="product:docs")],
+            [InlineKeyboardButton(f"✨ Gemini Pro 18 Bulan · {gemini_price} 🪙" if not english else f"✨ Gemini Pro 18 Months · {gemini_price} 🪙", callback_data="product:gemini")],
+            [InlineKeyboardButton("🪙 Coin Saya" if not english else "🪙 My Coins", callback_data="account:coins")],
+            [InlineKeyboardButton("🤝 Referral" if not english else "🤝 Referral", callback_data="referral:menu")],
+            [InlineKeyboardButton("🎁 Check-in Harian" if not english else "🎁 Daily Check-in", callback_data="checkin:daily")],
+            [InlineKeyboardButton("🌐 Bahasa / Language", callback_data="settings:language")],
+            [InlineKeyboardButton("🎟️ Redeem Code", callback_data="redeem:input")],
+            *([[InlineKeyboardButton("⚙️ Admin Settings", callback_data="admin:menu")]] if _is_admin(update.effective_user.id if update.effective_user else None) else []),
+        ]
+    )
+
+
+def _back_keyboard(callback_data: str = "menu:main") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data=callback_data)]])
+
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False) -> None:
+    _user_from_update(update)
+    if edit and update.callback_query is not None:
+        await update.callback_query.edit_message_text(
+            _main_menu_text(update), parse_mode="Markdown", reply_markup=_main_menu_keyboard(update)
+        )
+    else:
+        await _safe_reply_text(update, _main_menu_text(update), parse_mode="Markdown", reply_markup=_main_menu_keyboard(update))
+
+
+def _process_referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None or not context.args:
+        return
+    argument = context.args[0]
+    if not argument.startswith("ref_"):
+        return
+    code = argument[4:].upper()
+    with _db() as connection:
+        owner = connection.execute("SELECT user_id FROM users WHERE referral_code = ?", (code,)).fetchone()
+        if not owner or owner["user_id"] == user.id:
+            return
+        current = connection.execute("SELECT referred_by FROM users WHERE user_id = ?", (user.id,)).fetchone()
+        if current and current["referred_by"] is None:
+            reward = _setting("referral_reward", 2)
+            connection.execute("UPDATE users SET referred_by = ? WHERE user_id = ?", (owner["user_id"], user.id))
+            connection.execute("UPDATE users SET coins = coins + ? WHERE user_id IN (?, ?)", (reward, owner["user_id"], user.id))
+
+
 def _make_dashboard_text() -> str:
     return (
         "*Yowes Document Dashboard*\n\n"
@@ -224,14 +401,8 @@ def _make_dashboard_text() -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    keyboard = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("🆕 Buat Dokumen Baru", callback_data="new:document")],
-            [InlineKeyboardButton("🌍 Lihat Negara", callback_data="menu:countries")],
-            [InlineKeyboardButton("❓ Bantuan", callback_data="menu:help")],
-        ]
-    )
-    await _safe_reply_text(update, _make_dashboard_text(), parse_mode="Markdown", reply_markup=keyboard)
+    _process_referral(update, context)
+    await show_main_menu(update, context)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -255,6 +426,114 @@ async def countries(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         gen = get_country(code)()
         lines.append(f"• *{code.upper()}* — {gen.get_country_name()} ({', '.join(gen.get_document_types())})")
     await _safe_reply_text(update, "*Negara yang didukung*\n\n" + "\n".join(lines), parse_mode="Markdown")
+
+
+async def show_coins(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = _user_from_update(update)
+    if not user:
+        return
+    english = user["language"] == "en"
+    text = (
+        f"*My Coins*\n\nBalance: *{user['coins']} 🪙*\n\n"
+        "Earn coins from daily check-ins, referrals, and redeem codes."
+        if english
+        else f"*Coin Saya*\n\nSaldo: *{user['coins']} 🪙*\n\nDapatkan coin melalui check-in harian, referral, dan redeem code."
+    )
+    await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=_back_keyboard())
+
+
+async def show_referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = _user_from_update(update)
+    if not user:
+        return
+    bot_username = context.bot.username or os.getenv("BOT_USERNAME", "your_bot")
+    bot_username = bot_username.lstrip("@")
+    link = f"https://t.me/{bot_username}?start=ref_{user['referral_code']}"
+    reward = _setting("referral_reward", 2)
+    text = (
+        f"*Referral Program*\n\nYour link:\n`{link}`\n\nYou and your friend receive *{reward} 🪙* after the first join."
+        if user["language"] == "en"
+        else f"*Sistem Referral*\n\nLink Anda:\n`{link}`\n\nAnda dan teman Anda mendapatkan *{reward} 🪙* setelah teman bergabung."
+    )
+    await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=_back_keyboard())
+
+
+async def daily_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = _user_from_update(update)
+    if not user:
+        return
+    today = datetime.now().date().isoformat()
+    reward = _setting("checkin_reward", 1)
+    with _db() as connection:
+        if user["last_checkin"] == today:
+            message = "Check-in hari ini sudah dilakukan." if user["language"] != "en" else "Today's check-in is already completed."
+            balance = user["coins"]
+        else:
+            connection.execute("UPDATE users SET last_checkin = ?, coins = coins + ? WHERE user_id = ?", (today, reward, user["user_id"]))
+            balance = user["coins"] + reward
+            message = f"Check-in berhasil. Anda mendapatkan {reward} 🪙." if user["language"] != "en" else f"Check-in complete. You received {reward} 🪙."
+    await _safe_edit_text(update, f"*🎁 Daily Check-in*\n\n{message}\nSaldo: *{balance} 🪙*", parse_mode="Markdown", reply_markup=_back_keyboard())
+
+
+async def show_language_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _safe_edit_text(
+        update,
+        "*Language / Bahasa*\n\nPilih bahasa tampilan bot:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("🇮🇩 Indonesia", callback_data="language:id")],
+                [InlineKeyboardButton("🇬🇧 English", callback_data="language:en")],
+                [InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")],
+            ]
+        ),
+    )
+
+
+async def show_redeem_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data["step"] = REDEEM_CODE
+    await _safe_edit_text(
+        update,
+        "*Redeem Code*\n\nKirim kode redeem Anda melalui pesan berikutnya.",
+        parse_mode="Markdown",
+        reply_markup=_back_keyboard(),
+    )
+
+
+async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_admin(update.effective_user.id if update.effective_user else None):
+        await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard())
+        return
+    text = (
+        f"*Admin Settings*\n\n"
+        f"Harga Canva Doc: {_setting('doc_price', 3)} 🪙\n"
+        f"Harga Gemini Pro: {_setting('gemini_price', 20)} 🪙\n"
+        f"Reward check-in: {_setting('checkin_reward', 1)} 🪙\n"
+        f"Reward referral: {_setting('referral_reward', 2)} 🪙"
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("💰 Atur Harga", callback_data="admin:prices")],
+            [InlineKeyboardButton("🎟️ Buat Redeem Code", callback_data="admin:redeem")],
+            [InlineKeyboardButton("➕ Tambah Coin User", callback_data="admin:addcoins")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")],
+        ]
+    )
+    await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=keyboard)
+
+
+async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, product: str) -> None:
+    if product == "docs":
+        context.user_data["product"] = "docs"
+        await start_wizard(update, context)
+        return
+    price = _setting("gemini_price", 20)
+    await _safe_edit_text(
+        update,
+        f"*Gemini Pro 18 Bulan*\n\nHarga: *{price} 🪙*\n\nProduk tersedia melalui admin. Hubungi admin untuk proses aktivasi akun Anda.",
+        parse_mode="Markdown",
+        reply_markup=_back_keyboard(),
+    )
 
 
 async def schools(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -281,13 +560,88 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
     await query.answer()
     data = query.data or ""
 
+    if data == "menu:main":
+        context.user_data.pop("step", None)
+        await show_main_menu(update, context, edit=True)
+        return
+
+    if data.startswith("product:"):
+        await show_product(update, context, data.split(":", 1)[1])
+        return
+
+    if data == "account:coins":
+        await show_coins(update, context)
+        return
+
+    if data == "referral:menu":
+        await show_referral(update, context)
+        return
+
+    if data == "checkin:daily":
+        await daily_checkin(update, context)
+        return
+
+    if data == "settings:language":
+        await show_language_settings(update, context)
+        return
+
+    if data.startswith("language:"):
+        language = data.split(":", 1)[1]
+        user = update.effective_user
+        if user:
+            _ensure_user(user.id, user.username or user.full_name or "")
+            with _db() as connection:
+                connection.execute("UPDATE users SET language = ? WHERE user_id = ?", (language, user.id))
+        await show_main_menu(update, context, edit=True)
+        return
+
+    if data == "redeem:input":
+        await show_redeem_prompt(update, context)
+        return
+
+    if data == "admin:menu":
+        await show_admin_menu(update, context)
+        return
+
+    if data == "admin:prices":
+        context.user_data["step"] = "admin_prices"
+        await _safe_edit_text(
+            update,
+            "Kirim format: `doc_price gemini_price checkin_reward referral_reward`\nContoh: `3 20 1 2`",
+            parse_mode="Markdown",
+            reply_markup=_back_keyboard("admin:menu"),
+        )
+        return
+
+    if data == "admin:redeem":
+        context.user_data["step"] = "admin_redeem"
+        await _safe_edit_text(
+            update,
+            "Kirim format: `KODE JUMLAH_COIN MAKS_PAKAI`\nContoh: `WELCOME50 50 100`",
+            parse_mode="Markdown",
+            reply_markup=_back_keyboard("admin:menu"),
+        )
+        return
+
+    if data == "admin:addcoins":
+        context.user_data["step"] = ADMIN_ADD_COINS
+        await _safe_edit_text(
+            update,
+            "Kirim format: `USER_ID JUMLAH_COIN`\nContoh: `123456789 10`",
+            parse_mode="Markdown",
+            reply_markup=_back_keyboard("admin:menu"),
+        )
+        return
+
     if data == "new:document":
         context.user_data.clear()
-        await _safe_edit_text(update, "*Mulai pembuatan dokumen*\n\nPilih negara yang akan dipakai.", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(_format_country_list()))
+        keyboard = InlineKeyboardMarkup(_format_country_list() + [[InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")]])
+        await _safe_edit_text(update, "*Mulai pembuatan dokumen*\n\nPilih negara yang akan dipakai.", parse_mode="Markdown", reply_markup=keyboard)
         return
 
     if data == "menu:countries":
-        await _safe_edit_text(update, "*Daftar negara*", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(_format_country_list()))
+        keyboard = InlineKeyboardMarkup(_format_country_list() + [[InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")]])
+        await _safe_edit_text(update, "*Daftar negara*", parse_mode="Markdown", reply_markup=keyboard)
         return
 
     if data == "menu:help":
@@ -296,14 +650,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
 
     if data == "menu:home":
         context.user_data.clear()
-        keyboard = InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("🆕 Buat Dokumen Baru", callback_data="new:document")],
-                [InlineKeyboardButton("🌍 Lihat Negara", callback_data="menu:countries")],
-                [InlineKeyboardButton("❓ Bantuan", callback_data="menu:help")],
-            ]
-        )
-        await _safe_edit_text(update, _make_dashboard_text(), parse_mode="Markdown", reply_markup=keyboard)
+        await show_main_menu(update, context, edit=True)
         return
 
     if data == "action:randomize":
@@ -381,7 +728,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
 
 async def start_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
-    keyboard = InlineKeyboardMarkup(_format_country_list())
+    keyboard = InlineKeyboardMarkup(_format_country_list() + [[InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")]])
     await _safe_reply_text(update, "*Buat Dokumen Baru*\n\nPilih negara yang akan digunakan.", parse_mode="Markdown", reply_markup=keyboard)
 
 
@@ -389,6 +736,78 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     text = update.message.text.strip()
     step = context.user_data.get("step")
     country = context.user_data.get("country")
+
+    if step == REDEEM_CODE:
+        user = _user_from_update(update)
+        code = text.upper()
+        if not user:
+            return
+        with _db() as connection:
+            reward = connection.execute(
+                "SELECT * FROM redeem_codes WHERE code = ? AND active = 1 AND uses < max_uses",
+                (code,),
+            ).fetchone()
+            used = connection.execute(
+                "SELECT 1 FROM redemptions WHERE code = ? AND user_id = ?", (code, user["user_id"])
+            ).fetchone()
+            if not reward or used:
+                await update.message.reply_text("Kode tidak valid, sudah habis, atau sudah pernah digunakan.", reply_markup=_back_keyboard())
+                context.user_data.pop("step", None)
+                return
+            connection.execute("INSERT INTO redemptions(code, user_id, redeemed_at) VALUES (?, ?, ?)", (code, user["user_id"], datetime.now().isoformat()))
+            connection.execute("UPDATE redeem_codes SET uses = uses + 1 WHERE code = ?", (code,))
+            connection.execute("UPDATE users SET coins = coins + ? WHERE user_id = ?", (reward["coins"], user["user_id"]))
+        context.user_data.pop("step", None)
+        await update.message.reply_text(f"Redeem berhasil. Anda mendapatkan *{reward['coins']} 🪙*.", parse_mode="Markdown")
+        await show_main_menu(update, context)
+        return
+
+    if step == "admin_prices":
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            return
+        values = text.split()
+        if len(values) != 4 or not all(value.isdigit() for value in values):
+            await update.message.reply_text("Format tidak valid. Gunakan: `3 20 1 2`", parse_mode="Markdown")
+            return
+        for key, value in zip(("doc_price", "gemini_price", "checkin_reward", "referral_reward"), values):
+            _set_setting(key, int(value))
+        context.user_data.pop("step", None)
+        await update.message.reply_text("Pengaturan harga dan reward berhasil diperbarui.")
+        await show_admin_menu(update, context)
+        return
+
+    if step == "admin_redeem":
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            return
+        match = re.fullmatch(r"([A-Za-z0-9_-]+)\s+(\d+)\s+(\d+)", text)
+        if not match or int(match.group(2)) <= 0 or int(match.group(3)) <= 0:
+            await update.message.reply_text("Format tidak valid. Gunakan: `WELCOME50 50 100`", parse_mode="Markdown")
+            return
+        code, coins, max_uses = match.group(1).upper(), int(match.group(2)), int(match.group(3))
+        with _db() as connection:
+            connection.execute(
+                "INSERT INTO redeem_codes(code, coins, max_uses) VALUES (?, ?, ?) ON CONFLICT(code) DO UPDATE SET coins = excluded.coins, max_uses = excluded.max_uses, uses = 0, active = 1",
+                (code, coins, max_uses),
+            )
+        context.user_data.pop("step", None)
+        await update.message.reply_text(f"Redeem code `{code}` aktif: {coins} coin, maksimal {max_uses} penggunaan.", parse_mode="Markdown")
+        await show_admin_menu(update, context)
+        return
+
+    if step == ADMIN_ADD_COINS:
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            return
+        match = re.fullmatch(r"(\d+)\s+(\d+)", text)
+        if not match or int(match.group(2)) <= 0:
+            await update.message.reply_text("Format tidak valid. Gunakan: `USER_ID JUMLAH_COIN`", parse_mode="Markdown")
+            return
+        target_id, amount = int(match.group(1)), int(match.group(2))
+        _ensure_user(target_id)
+        balance = _add_coins(target_id, amount)
+        context.user_data.pop("step", None)
+        await update.message.reply_text(f"Berhasil menambahkan {amount} 🪙 ke user `{target_id}`. Saldo sekarang: {balance} 🪙.", parse_mode="Markdown")
+        await show_admin_menu(update, context)
+        return
 
     if step == FIRST_NAME:
         context.user_data["first_name"] = text
@@ -486,6 +905,17 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
         await _safe_reply_text(update, f"Data belum lengkap: {', '.join(missing)}")
         return
 
+    user = _user_from_update(update)
+    price = _setting("doc_price", 3)
+    if not user or not _spend_coins(user["user_id"], price):
+        await _safe_reply_text(
+            update,
+            f"Saldo tidak cukup. Pembuatan dokumen membutuhkan *{price} 🪙*. Silakan check-in, gunakan referral, atau redeem code.",
+            parse_mode="Markdown",
+            reply_markup=_back_keyboard(),
+        )
+        return
+
     try:
         result = generate_documents(
             country=country,
@@ -499,6 +929,7 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
             output_dir="output/telegram",
         )
     except ValueError as exc:
+        _add_coins(user["user_id"], price)
         message = str(exc)
         if "not found for" in message.lower() or "school" in message.lower():
             user_message = (
@@ -515,6 +946,7 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
         await _safe_reply_text(update, user_message, parse_mode="Markdown")
         return
     except Exception as exc:
+        _add_coins(user["user_id"], price)
         logger.exception("Unexpected document generation failure")
         await _safe_reply_text(
             update,
@@ -524,6 +956,7 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
 
     files = result.get("files", [])
     if not files:
+        _add_coins(user["user_id"], price)
         await _safe_reply_text(update, "Tidak ada file yang berhasil dibuat.")
         return
 
@@ -599,6 +1032,17 @@ async def generate_legacy(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     if doc:
                         documents.append(doc)
 
+        user = _user_from_update(update)
+        price = _setting("doc_price", 3)
+        if not user or not _spend_coins(user["user_id"], price):
+            await _safe_reply_text(
+                update,
+                f"Saldo tidak cukup. Pembuatan dokumen membutuhkan *{price} 🪙*.",
+                parse_mode="Markdown",
+                reply_markup=_back_keyboard(),
+            )
+            return
+
     try:
         result = generate_documents(
             country=country,
@@ -612,12 +1056,14 @@ async def generate_legacy(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             output_dir="output/telegram",
         )
     except Exception as exc:
+        _add_coins(user["user_id"], price)
         logger.exception("Legacy generate failed")
         await _safe_reply_text(update, f"Gagal menghasilkan dokumen: {exc}")
         return
 
     files = result.get("files", [])
     if not files:
+        _add_coins(user["user_id"], price)
         await _safe_reply_text(update, "Tidak ada file yang dibuat.")
         return
 
