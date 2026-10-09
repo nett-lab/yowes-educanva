@@ -375,14 +375,21 @@ def _normalize_document_type(value: str, supported_types: list[str]) -> str | No
     return normalized if normalized in supported_types else None
 
 
-def _format_school_buttons(country_code: str, limit=8, english: bool = False, include_back: bool = False):
+def _format_school_buttons(
+    country_code: str,
+    limit=8,
+    english: bool = False,
+    include_back: bool = False,
+    allow_manual: bool = True,
+):
     gen = get_country(country_code)()
     schools = gen.schools[:limit]
     buttons = [
         [InlineKeyboardButton(school["name"], callback_data=f"school:{school['name']}")]
         for school in schools
     ]
-    buttons.append([InlineKeyboardButton("✍️ Type manually" if english else "✍️ Ketik sendiri", callback_data="school:manual")])
+    if allow_manual:
+        buttons.append([InlineKeyboardButton("✍️ Type manually" if english else "✍️ Ketik sendiri", callback_data="school:manual")])
     if include_back:
         buttons.append([InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="menu:main")])
     return buttons
@@ -406,6 +413,13 @@ def _format_position_buttons(country_code: str, english: bool = False, include_b
     if include_back:
         buttons.append([InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="menu:main")])
     return buttons
+
+
+def _document_type_keyboard(country_code: str, update: Update) -> InlineKeyboardMarkup:
+    rows = _format_doc_type_buttons(country_code, update)
+    edit_label = "✏️ Edit School" if _is_english(update) else "✏️ Edit Sekolah"
+    rows.insert(-1, [InlineKeyboardButton(edit_label, callback_data="wizard:school")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _generate_random_dob() -> str:
@@ -820,6 +834,32 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         await show_product(update, context, data.split(":", 1)[1])
         return
 
+    if data == "wizard:school":
+        country = context.user_data.get("country")
+        if not country:
+            await _safe_edit_text(update, "Choose a country first." if _is_english(update) else "Pilih negara terlebih dahulu.", reply_markup=_back_keyboard())
+            return
+        context.user_data["school_selection_mode"] = "pre_doc"
+        school_keyboard = InlineKeyboardMarkup(
+            _format_school_buttons(
+                country,
+                english=_is_english(update),
+                include_back=True,
+                allow_manual=False,
+            )
+        )
+        await _safe_edit_text(
+            update,
+            (
+                f"*Select School*\n\nChoose an existing school for {get_country_display(country)}."
+                if _is_english(update)
+                else f"*Pilih Sekolah*\n\nPilih sekolah yang tersedia untuk {get_country_display(country)}."
+            ),
+            parse_mode="Markdown",
+            reply_markup=school_keyboard,
+        )
+        return
+
     if data == "account:coins":
         await show_coins(update, context)
         return
@@ -958,7 +998,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         context.user_data["country"] = country
         _apply_random_defaults(context, country)
         gen = get_country(country)()
-        keyboard = InlineKeyboardMarkup(_format_doc_type_buttons(country, update))
+        keyboard = _document_type_keyboard(country, update)
         english = _is_english(update)
         await _safe_edit_text(
             update,
@@ -1007,6 +1047,19 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
             context.user_data["step"] = SCHOOL
             return
         context.user_data["school"] = school_value
+        if context.user_data.pop("school_selection_mode", None) == "pre_doc":
+            country = context.user_data.get("country")
+            await _safe_edit_text(
+                update,
+                (
+                    f"*Selected school:* {school_value}\n\nChoose a document type."
+                    if _is_english(update)
+                    else f"*Sekolah dipilih:* {school_value}\n\nPilih tipe dokumen yang akan dibuat."
+                ),
+                parse_mode="Markdown",
+                reply_markup=_document_type_keyboard(country, update),
+            )
+            return
         await _safe_edit_text(update, _t(update, "choose_position"), parse_mode="Markdown", reply_markup=_back_keyboard())
         context.user_data["step"] = POSITION
         return
