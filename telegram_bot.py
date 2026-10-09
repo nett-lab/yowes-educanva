@@ -351,13 +351,15 @@ def _format_country_list() -> list[list[InlineKeyboardButton]]:
     return buttons
 
 
-def _format_doc_type_buttons(country_code: str) -> list[list[InlineKeyboardButton]]:
+def _format_doc_type_buttons(country_code: str, update: Update | None = None) -> list[list[InlineKeyboardButton]]:
     gen = get_country(country_code)()
     types = ["all"] + gen.get_document_types()
     buttons = []
     for doc in types:
         label = "ALL DOCUMENTS" if doc == "all" else doc.replace("_", " ").title()
         buttons.append([InlineKeyboardButton(label, callback_data=f"doc:{doc}")])
+    if update:
+        buttons.append([InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="menu:main")])
     return buttons
 
 
@@ -373,7 +375,7 @@ def _normalize_document_type(value: str, supported_types: list[str]) -> str | No
     return normalized if normalized in supported_types else None
 
 
-def _format_school_buttons(country_code: str, limit=8, english: bool = False):
+def _format_school_buttons(country_code: str, limit=8, english: bool = False, include_back: bool = False):
     gen = get_country(country_code)()
     schools = gen.schools[:limit]
     buttons = [
@@ -381,24 +383,28 @@ def _format_school_buttons(country_code: str, limit=8, english: bool = False):
         for school in schools
     ]
     buttons.append([InlineKeyboardButton("✍️ Type manually" if english else "✍️ Ketik sendiri", callback_data="school:manual")])
+    if include_back:
+        buttons.append([InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="menu:main")])
     return buttons
 
 
-def _format_gender_buttons() -> list[list[InlineKeyboardButton]]:
+def _format_gender_buttons(update: Update | None = None) -> list[list[InlineKeyboardButton]]:
     return [
         [InlineKeyboardButton("🎲 Random", callback_data="gender:Random")],
         [InlineKeyboardButton("👨 Male", callback_data="gender:Male")],
         [InlineKeyboardButton("👩 Female", callback_data="gender:Female")],
-    ]
+    ] + ([[InlineKeyboardButton("⬅️ Back" if update and _is_english(update) else "⬅️ Kembali", callback_data="menu:main")]] if update else [])
 
 
-def _format_position_buttons(country_code: str, english: bool = False) -> list[list[InlineKeyboardButton]]:
+def _format_position_buttons(country_code: str, english: bool = False, include_back: bool = False) -> list[list[InlineKeyboardButton]]:
     gen = get_country(country_code)()
     positions = gen.get_positions()
     buttons = []
     for pos in positions[:8]:
         buttons.append([InlineKeyboardButton(pos, callback_data=f"position:{pos}")])
     buttons.append([InlineKeyboardButton("✍️ Type manually" if english else "✍️ Ketik sendiri", callback_data="position:manual")])
+    if include_back:
+        buttons.append([InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="menu:main")])
     return buttons
 
 
@@ -754,7 +760,7 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, product: str) -> None:
     if product == "docs":
         context.user_data["product"] = "docs"
-        await start_wizard(update, context)
+        await start_wizard(update, context, edit=True)
         return
     price = _setting("gemini_price", 20)
     stock = _gemini_stock_count()
@@ -952,7 +958,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         context.user_data["country"] = country
         _apply_random_defaults(context, country)
         gen = get_country(country)()
-        keyboard = InlineKeyboardMarkup(_format_doc_type_buttons(country))
+        keyboard = InlineKeyboardMarkup(_format_doc_type_buttons(country, update))
         english = _is_english(update)
         await _safe_edit_text(
             update,
@@ -990,7 +996,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
     if data.startswith("gender:"):
         gender = data.split(":", 1)[1]
         context.user_data["gender"] = gender
-        await _safe_edit_text(update, "Silakan kirim *nama sekolah* yang diinginkan.", parse_mode="Markdown")
+        await _safe_edit_text(update, _t(update, "choose_school"), parse_mode="Markdown", reply_markup=_back_keyboard())
         context.user_data["step"] = SCHOOL
         return
 
@@ -1001,7 +1007,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
             context.user_data["step"] = SCHOOL
             return
         context.user_data["school"] = school_value
-        await _safe_edit_text(update, _t(update, "choose_position"), parse_mode="Markdown")
+        await _safe_edit_text(update, _t(update, "choose_position"), parse_mode="Markdown", reply_markup=_back_keyboard())
         context.user_data["step"] = POSITION
         return
 
@@ -1012,7 +1018,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
             context.user_data["step"] = POSITION
             return
         context.user_data["position"] = position_value
-        await _safe_edit_text(update, _t(update, "choose_dob"), parse_mode="Markdown")
+        await _safe_edit_text(update, _t(update, "choose_dob"), parse_mode="Markdown", reply_markup=_back_keyboard())
         context.user_data["step"] = DOB
         return
 
@@ -1021,16 +1027,19 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         return
 
     if data == "confirm:edit":
-        await start_wizard(update, context)
+        await start_wizard(update, context, edit=True)
         return
 
 
-async def start_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False) -> None:
     if not await require_channel_membership(update, context):
         return
     context.user_data.clear()
     keyboard = InlineKeyboardMarkup(_format_country_list() + [[InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")]])
-    await _safe_reply_text(update, _t(update, "new_document"), parse_mode="Markdown", reply_markup=keyboard)
+    if edit and update.callback_query is not None:
+        await _safe_edit_text(update, _t(update, "new_document"), parse_mode="Markdown", reply_markup=keyboard)
+    else:
+        await _safe_reply_text(update, _t(update, "new_document"), parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1145,7 +1154,7 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if step == LAST_NAME:
         context.user_data["last_name"] = text
-        keyboard = InlineKeyboardMarkup(_format_gender_buttons())
+        keyboard = InlineKeyboardMarkup(_format_gender_buttons(update))
         await update.message.reply_text(_t(update, "gender"), parse_mode="Markdown", reply_markup=keyboard)
         context.user_data["step"] = GENDER
         return
@@ -1153,7 +1162,7 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if step == GENDER:
         context.user_data["gender"] = text.title()
         if country:
-            school_buttons = InlineKeyboardMarkup(_format_school_buttons(country, english=_is_english(update)))
+            school_buttons = InlineKeyboardMarkup(_format_school_buttons(country, english=_is_english(update), include_back=True))
             await update.message.reply_text(_t(update, "school"), parse_mode="Markdown", reply_markup=school_buttons)
         else:
             await update.message.reply_text("Silakan pilih negara terlebih dahulu.")
@@ -1163,7 +1172,7 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if step == SCHOOL:
         context.user_data["school"] = text
         if country:
-            position_buttons = InlineKeyboardMarkup(_format_position_buttons(country, english=_is_english(update)))
+            position_buttons = InlineKeyboardMarkup(_format_position_buttons(country, english=_is_english(update), include_back=True))
             await update.message.reply_text(_t(update, "position"), parse_mode="Markdown", reply_markup=position_buttons)
         else:
             await update.message.reply_text("Silakan pilih negara terlebih dahulu.")
@@ -1216,7 +1225,10 @@ async def confirm_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             [InlineKeyboardButton(f"✏️ {_t(update, 'edit')}", callback_data="confirm:edit")],
         ]
     )
-    await _safe_reply_text(update, summary, parse_mode="Markdown", reply_markup=keyboard)
+    if update.callback_query is not None:
+        await _safe_edit_text(update, summary, parse_mode="Markdown", reply_markup=keyboard)
+    else:
+        await _safe_reply_text(update, summary, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def generate_document_from_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1319,7 +1331,10 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
             [InlineKeyboardButton("🏠 Dashboard", callback_data="menu:home")],
         ]
     )
-    await _safe_reply_text(update, summary, parse_mode="Markdown", reply_markup=next_actions)
+    if update.callback_query is not None:
+        await _safe_edit_text(update, summary, parse_mode="Markdown", reply_markup=next_actions)
+    else:
+        await _safe_reply_text(update, summary, parse_mode="Markdown", reply_markup=next_actions)
 
     for index, file_path in enumerate(files, start=1):
         await _send_generated_file(
