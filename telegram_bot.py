@@ -1,4 +1,5 @@
 import asyncio
+from html import escape
 import logging
 import os
 import random
@@ -381,6 +382,7 @@ def _format_school_buttons(
     english: bool = False,
     include_back: bool = False,
     allow_manual: bool = True,
+    back_callback: str = "menu:main",
 ):
     gen = get_country(country_code)()
     schools = gen.schools[:limit]
@@ -391,7 +393,7 @@ def _format_school_buttons(
     if allow_manual:
         buttons.append([InlineKeyboardButton("✍️ Type manually" if english else "✍️ Ketik sendiri", callback_data="school:manual")])
     if include_back:
-        buttons.append([InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="menu:main")])
+        buttons.append([InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data=back_callback)])
     return buttons
 
 
@@ -464,6 +466,10 @@ def _language(update: Update) -> str:
 
 def _is_english(update: Update) -> bool:
     return _language(update) == "en"
+
+
+def _safe_html(value: object) -> str:
+    return escape(str(value), quote=False)
 
 
 _TEXT = {
@@ -834,6 +840,19 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         await show_product(update, context, data.split(":", 1)[1])
         return
 
+    if data == "wizard:document_types":
+        country = context.user_data.get("country")
+        if country:
+            context.user_data.pop("school_selection_mode", None)
+            await _safe_edit_text(
+                update,
+                "Choose a document type." if _is_english(update) else "Pilih tipe dokumen yang akan dibuat.",
+                reply_markup=_document_type_keyboard(country, update),
+            )
+        else:
+            await show_main_menu(update, context, edit=True)
+        return
+
     if data == "wizard:school":
         country = context.user_data.get("country")
         if not country:
@@ -846,6 +865,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
                 english=_is_english(update),
                 include_back=True,
                 allow_manual=False,
+                back_callback="wizard:document_types",
             )
         )
         await _safe_edit_text(
@@ -1003,16 +1023,16 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         await _safe_edit_text(
             update,
             (
-                f"*Selected country:* {get_country_display(country)}\n\nYour data has been filled automatically.\n"
-                f"Name: {context.user_data['first_name']} {context.user_data['last_name']}\n"
-                f"School: {context.user_data['school']}\nPosition: {context.user_data['position']}\n"
-                f"Date of birth: {context.user_data['dob']}\n\nChoose a document type."
+                f"<b>Selected country:</b> {_safe_html(get_country_display(country))}\n\nYour data has been filled automatically.\n"
+                f"Name: {_safe_html(context.user_data['first_name'])} {_safe_html(context.user_data['last_name'])}\n"
+                f"School: {_safe_html(context.user_data['school'])}\nPosition: {_safe_html(context.user_data['position'])}\n"
+                f"Date of birth: {_safe_html(context.user_data['dob'])}\n\nChoose a document type."
                 if english
-                else f"*Negara dipilih:* {get_country_display(country)}\n\nBerikut data otomatis yang sudah diisi untuk Anda.\n"
-                f"Nama: {context.user_data['first_name']} {context.user_data['last_name']}\nSekolah: {context.user_data['school']}\n"
-                f"Posisi: {context.user_data['position']}\nTanggal lahir: {context.user_data['dob']}\n\nPilih tipe dokumen yang akan dibuat."
+                else f"<b>Negara dipilih:</b> {_safe_html(get_country_display(country))}\n\nBerikut data otomatis yang sudah diisi untuk Anda.\n"
+                f"Nama: {_safe_html(context.user_data['first_name'])} {_safe_html(context.user_data['last_name'])}\nSekolah: {_safe_html(context.user_data['school'])}\n"
+                f"Posisi: {_safe_html(context.user_data['position'])}\nTanggal lahir: {_safe_html(context.user_data['dob'])}\n\nPilih tipe dokumen yang akan dibuat."
             ),
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=keyboard,
         )
         return
@@ -1052,11 +1072,11 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
             await _safe_edit_text(
                 update,
                 (
-                    f"*Selected school:* {school_value}\n\nChoose a document type."
+                    f"<b>Selected school:</b> {_safe_html(school_value)}\n\nChoose a document type."
                     if _is_english(update)
-                    else f"*Sekolah dipilih:* {school_value}\n\nPilih tipe dokumen yang akan dibuat."
+                    else f"<b>Sekolah dipilih:</b> {_safe_html(school_value)}\n\nPilih tipe dokumen yang akan dibuat."
                 ),
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 reply_markup=_document_type_keyboard(country, update),
             )
             return
@@ -1262,13 +1282,14 @@ async def confirm_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     summary = (
-        f"{_t(update, 'review')}\n\n• Country: {get_country_display(country)}\n• Document type: {payload.get('document_type', 'all')}\n"
-        f"• Name: {payload.get('first_name', '')} {payload.get('last_name', '')}\n• Gender: {payload.get('gender', 'Random')}\n"
-        f"• School: {payload.get('school', '-')}\n• Position: {payload.get('position', '-')}\n• Date of birth: {payload.get('dob', '-')}"
-        if _is_english(update)
-        else f"{_t(update, 'review')}\n\n• Negara: {get_country_display(country)}\n• Tipe Dokumen: {payload.get('document_type', 'all')}\n"
-        f"• Nama: {payload.get('first_name', '')} {payload.get('last_name', '')}\n• Gender: {payload.get('gender', 'Random')}\n"
-        f"• Sekolah: {payload.get('school', '-')}\n• Posisi: {payload.get('position', '-')}\n• Tanggal Lahir: {payload.get('dob', '-')}"
+        f"<b>{'Document Review' if _is_english(update) else 'Review Dokumen'}</b>\n\n"
+        f"• {'Country' if _is_english(update) else 'Negara'}: {_safe_html(get_country_display(country))}\n"
+        f"• {'Document type' if _is_english(update) else 'Tipe Dokumen'}: {_safe_html(payload.get('document_type', 'all'))}\n"
+        f"• {'Name' if _is_english(update) else 'Nama'}: {_safe_html(payload.get('first_name', ''))} {_safe_html(payload.get('last_name', ''))}\n"
+        f"• Gender: {_safe_html(payload.get('gender', 'Random'))}\n"
+        f"• {'School' if _is_english(update) else 'Sekolah'}: {_safe_html(payload.get('school', '-'))}\n"
+        f"• {'Position' if _is_english(update) else 'Posisi'}: {_safe_html(payload.get('position', '-'))}\n"
+        f"• {'Date of birth' if _is_english(update) else 'Tanggal Lahir'}: {_safe_html(payload.get('dob', '-'))}"
     )
 
     keyboard = InlineKeyboardMarkup(
@@ -1279,9 +1300,9 @@ async def confirm_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         ]
     )
     if update.callback_query is not None:
-        await _safe_edit_text(update, summary, parse_mode="Markdown", reply_markup=keyboard)
+        await _safe_edit_text(update, summary, parse_mode="HTML", reply_markup=keyboard)
     else:
-        await _safe_reply_text(update, summary, parse_mode="Markdown", reply_markup=keyboard)
+        await _safe_reply_text(update, summary, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def generate_document_from_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1353,7 +1374,7 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
                 if _is_english(update)
                 else "Maaf, dokumen tidak dapat dibuat untuk saat ini. Silakan periksa data yang Anda masukkan dan coba lagi."
             )
-        await _safe_reply_text(update, user_message, parse_mode="Markdown")
+        await _safe_reply_text(update, user_message)
         return
     except Exception as exc:
         _add_coins(user["user_id"], price, "Document generation refund")
@@ -1373,10 +1394,11 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
         return
 
     summary = (
-        f"*Documents created successfully*\n\n• Country: {result['country']}\n• School: {result['school']}\n"
-        f"• Types: {', '.join(result['document_types'])}\n• Files: {result['count']}"
-        if _is_english(update)
-        else f"*Dokumen selesai dibuat*\n\n• Negara: {result['country']}\n• Sekolah: {result['school']}\n• Tipe: {', '.join(result['document_types'])}\n• Total file: {result['count']}"
+        f"<b>{'Documents created successfully' if _is_english(update) else 'Dokumen selesai dibuat'}</b>\n\n"
+        f"• {'Country' if _is_english(update) else 'Negara'}: {_safe_html(result['country'])}\n"
+        f"• {'School' if _is_english(update) else 'Sekolah'}: {_safe_html(result['school'])}\n"
+        f"• {'Types' if _is_english(update) else 'Tipe'}: {_safe_html(', '.join(result['document_types']))}\n"
+        f"• {'Files' if _is_english(update) else 'Total file'}: {_safe_html(result['count'])}"
     )
     next_actions = InlineKeyboardMarkup(
         [
@@ -1385,9 +1407,9 @@ async def generate_document_from_state(update: Update, context: ContextTypes.DEF
         ]
     )
     if update.callback_query is not None:
-        await _safe_edit_text(update, summary, parse_mode="Markdown", reply_markup=next_actions)
+        await _safe_edit_text(update, summary, parse_mode="HTML", reply_markup=next_actions)
     else:
-        await _safe_reply_text(update, summary, parse_mode="Markdown", reply_markup=next_actions)
+        await _safe_reply_text(update, summary, parse_mode="HTML", reply_markup=next_actions)
 
     for index, file_path in enumerate(files, start=1):
         await _send_generated_file(
