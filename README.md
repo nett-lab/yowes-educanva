@@ -545,6 +545,8 @@ Yowes Telegram bot started successfully
 
 8. Tes bot melalui Telegram dengan `/start`, join channel jika diminta, lalu lakukan check-in dan buka menu utama.
 
+Jika Botkeep menampilkan pesan **The compressed repository exceeds 20 MB**, jangan menghapus foto atau font yang dibutuhkan generator. Gunakan tab **SFTP** untuk project ini karena asset profile photo dan font memang merupakan bagian dari runtime. Ambil credential SFTP dari Botkeep, lalu upload source terbaru ke project root menggunakan WinSCP atau client SFTP lain. Untuk update biasa, jangan menimpa `.env` atau `data/bot.sqlite3` di server; setelah upload selesai, pertahankan start command `python telegram_bot.py` dan restart server dari panel.
+
 ### Data dan backup
 
 Bot menyimpan saldo, referral, histori coin, redeem code, dan stok Gemini pada:
