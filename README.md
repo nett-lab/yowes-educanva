@@ -25,6 +25,7 @@
 - [Usage — MCP server](#usage--mcp-server)
 - [Telegram Bot](#telegram-bot)
 - [Instalasi Bot di RDP Windows Fresh](#instalasi-bot-di-rdp-windows-fresh)
+- [Deploy di Botkeep](#deploy-di-botkeep)
 - [Legacy GUI](#legacy-gui)
 - [Project structure](#project-structure)
 - [Adding a new country](#adding-a-new-country)
@@ -480,6 +481,99 @@ Start-ScheduledTask -TaskName 'Yowes Telegram Bot'
 | Bot tidak merespons | Pastikan hanya satu instance bot yang aktif dan internet RDP tidak diblokir firewall/proxy. |
 | Dokumen tersimpan tetapi tidak terkirim | Jalankan bot foreground untuk melihat error Telegram, lalu pastikan token masih valid dan bot tidak berjalan di server lain. |
 | `ModuleNotFoundError` | Aktifkan `.venv` lalu ulangi `python -m pip install -r requirements.txt`. |
+
+## Deploy di Botkeep
+
+Bot ini dapat dijalankan sebagai Python application di Botkeep. Panduan ini mengikuti alur **Deploy from GitHub** pada dokumentasi Botkeep.
+
+### Konfigurasi server
+
+Pada halaman **Create server**, gunakan konfigurasi berikut:
+
+| Field | Nilai |
+|-------|-------|
+| What are you deploying | `Application` |
+| Runtime | `Python` |
+| Source | `GitHub` |
+| Repository | `nett-lab/yowes-educanva` |
+| Branch | `main` |
+| Project root | `/` atau root repository yang berisi `requirements.txt` |
+| Runtime profile | Python versi yang tersedia, misalnya `3.13` |
+| Start command | `python telegram_bot.py` |
+
+Jangan gunakan `python main.py` karena entry point bot Telegram adalah `telegram_bot.py`. Bot juga tidak membutuhkan public port atau domain karena bekerja melalui long polling Telegram.
+
+### Environment secrets
+
+Masukkan nilai berikut melalui menu **Environment** Botkeep, bukan melalui file yang di-commit ke GitHub:
+
+```env
+BOT_TOKEN=token_dari_BotFather
+BOT_USERNAME=@username_bot
+ADMIN_IDS=123456789
+```
+
+- `BOT_TOKEN` wajib diisi dan harus disimpan sebagai secret.
+- `BOT_USERNAME` digunakan untuk membuat link referral.
+- `ADMIN_IDS` berisi Telegram numeric user ID admin, dipisahkan koma jika lebih dari satu.
+- Jangan upload `.env` ke GitHub atau ZIP deployment.
+
+### Persiapan channel wajib
+
+Sebelum deploy, tambahkan bot sebagai administrator pada channel:
+
+```text
+@canvaproteam04
+```
+
+Bot membutuhkan permission tersebut untuk memverifikasi apakah user sudah join channel sebelum membuka menu utama.
+
+### Proses deploy
+
+1. Hubungkan akun GitHub dan izinkan Botkeep mengakses repository `nett-lab/yowes-educanva`.
+2. Pilih branch `main` dan pastikan project root menunjuk ke lokasi `requirements.txt`.
+3. Pilih runtime Python.
+4. Masukkan start command `python telegram_bot.py`.
+5. Tambahkan environment secrets.
+6. Review konfigurasi, lalu deploy server.
+7. Buka **Console/Logs** dan pastikan muncul log:
+
+```text
+Yowes Telegram bot started successfully
+```
+
+8. Tes bot melalui Telegram dengan `/start`, join channel jika diminta, lalu lakukan check-in dan buka menu utama.
+
+### Data dan backup
+
+Bot menyimpan saldo, referral, histori coin, redeem code, dan stok Gemini pada:
+
+```text
+data/bot.sqlite3
+```
+
+Folder `data/` tidak dikirim ke GitHub karena berisi data operasional. Gunakan fitur backup Botkeep dan simpan salinan penting di luar server sebelum redeploy, restore, atau menghapus server. Jangan menganggap filesystem deployment sebagai satu-satunya backup.
+
+Folder berikut juga tidak perlu di-commit:
+
+```text
+.env
+.venv/
+output/
+data/
+```
+
+### Setelah deploy atau update
+
+Setiap kali melakukan redeploy dari GitHub:
+
+1. Pastikan environment secrets tetap tersedia.
+2. Pastikan start command tetap `python telegram_bot.py`.
+3. Periksa Console untuk error dependency atau token.
+4. Uji `/start`, membership channel, menu coin, redeem code, dan pembuatan satu dokumen.
+5. Pastikan `data/bot.sqlite3` masih tersedia sebelum menganggap deployment selesai.
+
+Resource kecil seperti 512 MB RAM dan 1 GB storage biasanya cukup untuk proses bot ringan, tetapi folder `output/telegram/` perlu dipantau karena setiap dokumen yang dibuat menghasilkan file PNG.
 
 ## Legacy GUI
 
