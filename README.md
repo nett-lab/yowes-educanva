@@ -267,6 +267,7 @@ A Telegram bot is also available for lightweight, on-the-go document generation.
 - Gemini Pro stock management with JIO links, descriptions, and live stock count
 - Automatic localized redeem-code announcements with a one-tap redeem button
 - Mandatory subscription gate for `t.me/canvaproteam04` before using bot features
+- Automatic permanent deletion of generated Telegram images after 10 minutes
 - Admin settings for prices, rewards, redeem codes, and manual coin grants
 
 ### Setup
@@ -551,6 +552,8 @@ Bot menyimpan saldo, referral, histori coin, redeem code, dan stok Gemini pada:
 ```text
 data/bot.sqlite3
 ```
+
+File hasil generate di `output/telegram/` dibersihkan otomatis setiap menit setelah berusia lebih dari 10 menit. Kebijakan ini hanya menghapus file gambar hasil dokumen (`.png`, `.jpg`, `.jpeg`, `.webp`) dan tidak menghapus database, source code, `.env`, atau data user.
 
 Folder `data/` tidak dikirim ke GitHub karena berisi data operasional. Gunakan fitur backup Botkeep dan simpan salinan penting di luar server sebelum redeploy, restore, atau menghapus server. Jangan menganggap filesystem deployment sebagai satu-satunya backup.
 

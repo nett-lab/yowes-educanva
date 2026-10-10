@@ -7,6 +7,7 @@ import re
 import secrets
 import shlex
 import sqlite3
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -37,6 +38,9 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE_PATH = DATA_DIR / "bot.sqlite3"
 REQUIRED_CHANNEL = "@canvaproteam04"
 REQUIRED_CHANNEL_URL = "https://t.me/canvaproteam04"
+MEDIA_RETENTION_SECONDS = 10 * 60
+MEDIA_CLEANUP_INTERVAL_SECONDS = 60
+_media_cleanup_task: asyncio.Task | None = None
 
 COUNTRY_LABELS = {
     "uk": "🇬🇧 United Kingdom",
@@ -53,6 +57,49 @@ COUNTRY_LABELS = {
     "thailand": "🇹🇭 Thailand",
     "us": "🇺🇸 United States",
 }
+
+
+def _delete_expired_media() -> int:
+    cutoff = time.time() - MEDIA_RETENTION_SECONDS
+    output_root = OUTPUT_DIR.resolve()
+    removed = 0
+    for path in OUTPUT_DIR.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+            continue
+        try:
+            if not path.resolve().is_relative_to(output_root) or path.stat().st_mtime >= cutoff:
+                continue
+            path.unlink()
+            removed += 1
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            logger.warning("Could not remove expired media %s: %s", path, exc)
+    return removed
+
+
+async def _media_cleanup_loop() -> None:
+    while True:
+        removed = await asyncio.to_thread(_delete_expired_media)
+        if removed:
+            logger.info("Removed %s expired Telegram media file(s)", removed)
+        await asyncio.sleep(MEDIA_CLEANUP_INTERVAL_SECONDS)
+
+
+async def _start_media_cleanup(application) -> None:
+    global _media_cleanup_task
+    _delete_expired_media()
+    _media_cleanup_task = asyncio.create_task(_media_cleanup_loop())
+
+
+async def _stop_media_cleanup(application) -> None:
+    global _media_cleanup_task
+    if _media_cleanup_task is None:
+        return
+    _media_cleanup_task.cancel()
+    try:
+        await _media_cleanup_task
+    except asyncio.CancelledError:
+        pass
+    _media_cleanup_task = None
 
 (
     COUNTRY,
@@ -1524,7 +1571,13 @@ def main() -> None:
     if not token:
         raise RuntimeError("BOT_TOKEN is not set. Add it to your environment or .env file before starting the bot.")
 
-    app = ApplicationBuilder().token(token).build()
+    app = (
+        ApplicationBuilder()
+        .token(token)
+        .post_init(_start_media_cleanup)
+        .post_shutdown(_stop_media_cleanup)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("new", start_wizard))
