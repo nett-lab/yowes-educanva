@@ -575,11 +575,39 @@ def _safe_reply_text(update: Update, text: str, **kwargs):
     return None
 
 
-def _safe_edit_text(update: Update, text: str, **kwargs):
+async def _safe_edit_text(update: Update, text: str, **kwargs):
+    """Edit the current inline-keyboard message to show new text.
+
+    Falls back gracefully when the current message is a photo/media
+    (e.g. after the QRIS payment screen): deletes the media message
+    and sends a fresh text message so the user always gets a response.
+    """
     if update.callback_query is not None:
-        return update.callback_query.edit_message_text(text, **kwargs)
+        try:
+            return await update.callback_query.edit_message_text(text, **kwargs)
+        except TelegramError as exc:
+            err_lower = str(exc).lower()
+            if "message is not modified" in err_lower:
+                # Content unchanged — not an error worth acting on.
+                return None
+            if "there is no text in the message" in err_lower or "no text in the message" in err_lower:
+                # The current message is a photo/media (e.g. QRIS image).
+                # Delete it and send a new text message instead.
+                try:
+                    await update.callback_query.message.delete()
+                except TelegramError:
+                    pass
+                if update.effective_chat:
+                    return await update.callback_query.get_bot().send_message(
+                        chat_id=update.effective_chat.id,
+                        text=text,
+                        **kwargs,
+                    )
+            else:
+                logger.warning("_safe_edit_text failed: %s", exc)
+            return None
     if update.message is not None:
-        return update.message.reply_text(text, **kwargs)
+        return await update.message.reply_text(text, **kwargs)
     return None
 
 
