@@ -259,6 +259,10 @@ class ProdSellerError(RuntimeError):
     """Safe provider error that never contains the API key."""
 
 
+class ProdSellerFundingError(ProdSellerError):
+    """Provider account cannot fund the requested order."""
+
+
 def _prodseller_base_url() -> str:
     return os.getenv("PRODSELLER_BASE_URL", "https://prodseller.com/v1").rstrip("/")
 
@@ -319,7 +323,14 @@ async def _find_gemini_product() -> dict:
 
 async def _create_gemini_order(user_id: int, product: dict, email: str | None = None) -> dict:
     price = _setting("gemini_price", 20)
-    user = _ensure_user(user_id)
+    provider_balance = await asyncio.to_thread(_prodseller_request_sync, "GET", "/balance")
+    try:
+        provider_price = float(product.get("price", 0))
+        available_balance = float(provider_balance.get("balance", 0))
+    except (TypeError, ValueError) as exc:
+        raise ProdSellerError("ProdSeller returned an invalid balance") from exc
+    if available_balance < provider_price:
+        raise ProdSellerFundingError("ProdSeller balance is insufficient")
     if not _spend_coins(user_id, price, "Gemini Pro purchase"):
         raise ProdSellerError(f"Insufficient coin balance; requires {price} coins")
     idempotency_key = f"gemini-{user_id}-{secrets.token_hex(12)}"
@@ -907,10 +918,27 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             [InlineKeyboardButton("🎟️ Create Redeem Code" if _is_english(update) else "🎟️ Buat Redeem Code", callback_data="admin:redeem")],
             [InlineKeyboardButton("➕ Grant User Coins" if _is_english(update) else "➕ Tambah Coin User", callback_data="admin:addcoins")],
             [InlineKeyboardButton("📦 Manage Gemini Stock" if _is_english(update) else "📦 Kelola Stok Gemini", callback_data="admin:stock")],
+            [InlineKeyboardButton("💳 Provider Balance" if _is_english(update) else "💳 Saldo Provider", callback_data="admin:provider_balance")],
             [InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="menu:main")],
         ]
     )
     await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=keyboard)
+
+
+async def show_provider_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_admin(update.effective_user.id if update.effective_user else None):
+        await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
+        return
+    try:
+        balance = await asyncio.to_thread(_prodseller_request_sync, "GET", "/balance")
+        text = (
+            f"*Provider Balance*\n\nBalance: *{balance.get('balance', '-')} USDT*\nMembership: *{balance.get('membership', '-')}*"
+            if _is_english(update)
+            else f"*Saldo Provider*\n\nSaldo: *{balance.get('balance', '-')} USDT*\nMembership: *{balance.get('membership', '-')}*"
+        )
+    except ProdSellerError:
+        text = "Provider balance is unavailable. Check PRODSELLER_API_KEY." if _is_english(update) else "Saldo provider tidak tersedia. Periksa PRODSELLER_API_KEY."
+    await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=_back_keyboard("admin:menu"))
 
 
 async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, product: str) -> None:
@@ -964,6 +992,15 @@ async def _complete_gemini_purchase(update: Update, context: ContextTypes.DEFAUL
     try:
         product = await _find_gemini_product()
         order = await _create_gemini_order(user["user_id"], product, email)
+    except ProdSellerFundingError as exc:
+        message = (
+            "Gemini Pro is temporarily unavailable because the provider balance is insufficient. Please try again later."
+            if _is_english(update)
+            else "Gemini Pro sementara tidak tersedia karena saldo provider tidak mencukupi. Silakan coba lagi nanti."
+        )
+        await _safe_reply_text(update, message, reply_markup=_back_keyboard())
+        logger.info("Gemini order blocked by provider balance: %s", exc)
+        return
     except ProdSellerError as exc:
         message = str(exc)
         if "Insufficient coin" in message:
@@ -1126,6 +1163,10 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
 
     if data == "admin:menu":
         await show_admin_menu(update, context)
+        return
+
+    if data == "admin:provider_balance":
+        await show_provider_balance(update, context)
         return
 
     if data == "admin:prices":

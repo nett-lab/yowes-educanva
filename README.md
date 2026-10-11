@@ -296,6 +296,8 @@ PRODSELLER_BASE_URL=https://prodseller.com/v1
 
 `PRODSELLER_API_KEY` must be stored as a Botkeep secret. `PRODSELLER_PRODUCT_ID` is recommended because it selects one exact Gemini product; when empty, the bot searches active products using `PRODSELLER_PRODUCT_NAME`. The provider's live stock and price are displayed to users, while the bot's configured coin price is charged locally.
 
+ProdSeller orders use the API key's prepaid USDT balance. The public API documentation does not expose a top-up or Binance-transfer endpoint, so the bot cannot safely route a Binance transfer directly into an order. If ProdSeller provides Binance/USDT funding, complete it through the provider's official admin/funding page and wait for the API balance to update. The bot will block Gemini orders before charging user coins while that provider balance is insufficient. Admins can check it from **Admin Settings → Provider Balance**.
+
 Or set it directly in the environment:
 
 ```bash
@@ -357,6 +359,7 @@ When `PRODSELLER_API_KEY` is configured, the Gemini menu uses:
 - `POST /v1/orders` to create an order with `X-API-Key` and a unique `Idempotency-Key`.
 - An activation email only when the product declares `requiresEmailActivation`.
 - Automatic coin refund when the provider rejects an order.
+- A provider-balance preflight prevents local coin deduction when the Prodseller USDT balance cannot fund the order.
 
 If the API key is not configured, the existing local Gemini stock menu remains available and no provider request is made. Never place the Prodseller API key in `.env` committed to GitHub, README files, logs, or Telegram messages.
 
