@@ -1,4 +1,5 @@
 import asyncio
+import json
 from html import escape
 import logging
 import os
@@ -8,6 +9,8 @@ import secrets
 import shlex
 import sqlite3
 import time
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from datetime import datetime
 from pathlib import Path
 
@@ -27,7 +30,6 @@ from telegram.ext import (
     filters,
 )
 from telegram.request import HTTPXRequest
-import requests
 
 from countries import get_country, list_countries
 from mcp_server import generate_documents
@@ -307,24 +309,30 @@ def _prodseller_request_sync(method: str, path: str, **kwargs) -> dict:
     if method.upper() == "POST":
         headers["Content-Type"] = "application/json"
     headers.update(kwargs.pop("headers", {}))
+    body = kwargs.pop("json", None)
+    request = Request(
+        f"{_prodseller_base_url()}{path}",
+        data=json.dumps(body).encode("utf-8") if body is not None else None,
+        headers=headers,
+        method=method.upper(),
+    )
     try:
-        response = requests.request(
-            method,
-            f"{_prodseller_base_url()}{path}",
-            headers=headers,
-            timeout=20,
-            **kwargs,
-        )
-    except requests.RequestException as exc:
+        with urlopen(request, timeout=20) as response:
+            status_code = response.status
+            raw_payload = response.read()
+    except HTTPError as exc:
+        status_code = exc.code
+        raw_payload = exc.read()
+    except (URLError, TimeoutError, OSError) as exc:
         raise ProdSellerError("ProdSeller is temporarily unreachable") from exc
     try:
-        payload = response.json()
-    except ValueError as exc:
+        payload = json.loads(raw_payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ProdSellerError("ProdSeller returned an invalid response") from exc
-    if not response.ok:
+    if not 200 <= status_code < 300:
         provider_message = payload.get("error") if isinstance(payload, dict) else None
-        logger.warning("ProdSeller request failed: status=%s error=%s", response.status_code, provider_message)
-        raise ProdSellerError(provider_message or f"ProdSeller request failed ({response.status_code})")
+        logger.warning("ProdSeller request failed: status=%s error=%s", status_code, provider_message)
+        raise ProdSellerError(provider_message or f"ProdSeller request failed ({status_code})")
     return payload
 
 
