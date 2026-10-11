@@ -172,6 +172,20 @@ def init_database() -> None:
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS payment_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                method TEXT NOT NULL,
+                amount TEXT NOT NULL,
+                reference TEXT NOT NULL,
+                evidence_file_id TEXT,
+                email TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                provider_order_id TEXT,
+                created_at TEXT NOT NULL,
+                reviewed_at TEXT,
+                reviewed_by INTEGER
+            );
             """
         )
         connection.executemany(
@@ -331,7 +345,12 @@ async def _find_gemini_product() -> dict:
     return matches[0]
 
 
-async def _create_gemini_order(user_id: int, product: dict, email: str | None = None) -> dict:
+async def _create_gemini_order(
+    user_id: int,
+    product: dict,
+    email: str | None = None,
+    charge_coins: bool = True,
+) -> dict:
     price = _setting("gemini_price", 20)
     provider_balance = await asyncio.to_thread(_prodseller_request_sync, "GET", "/balance")
     try:
@@ -341,7 +360,7 @@ async def _create_gemini_order(user_id: int, product: dict, email: str | None = 
         raise ProdSellerError("ProdSeller returned an invalid balance") from exc
     if available_balance < provider_price:
         raise ProdSellerFundingError("ProdSeller balance is insufficient")
-    if not _spend_coins(user_id, price, "Gemini Pro purchase"):
+    if charge_coins and not _spend_coins(user_id, price, "Gemini Pro purchase"):
         raise ProdSellerError(f"Insufficient coin balance; requires {price} coins")
     idempotency_key = f"gemini-{user_id}-{secrets.token_hex(12)}"
     body = {"productId": product["id"], "quantity": 1}
@@ -356,7 +375,8 @@ async def _create_gemini_order(user_id: int, product: dict, email: str | None = 
             headers={"Idempotency-Key": idempotency_key},
         )
     except ProdSellerError:
-        _add_coins(user_id, price, "Gemini Pro purchase refund")
+        if charge_coins:
+            _add_coins(user_id, price, "Gemini Pro purchase refund")
         raise
     return order
 
@@ -1004,6 +1024,147 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
     await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=keyboard)
 
 
+async def show_gemini_payment_methods(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    english = _is_english(update)
+    text = (
+        "<b>Choose payment method</b>\n\nSelect Binance USDT or QRIS. Your order is processed after admin verification."
+        if english
+        else "<b>Pilih metode pembayaran</b>\n\nPilih Binance USDT atau QRIS. Pesanan diproses setelah diverifikasi admin."
+    )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("💳 Binance · 0.60 USDT", callback_data="gemini:pay:binance")],
+            [InlineKeyboardButton("📱 QRIS · Rp20.000", callback_data="gemini:pay:qris")],
+            [InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="product:gemini")],
+        ]
+    )
+    await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=keyboard)
+
+
+async def show_payment_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE, method: str) -> None:
+    english = _is_english(update)
+    context.user_data["payment_method"] = method
+    context.user_data["step"] = f"gemini_payment_{method}"
+    if method == "binance":
+        address = os.getenv("BINANCE_PAYMENT_ADDRESS", "").strip()
+        network = os.getenv("BINANCE_NETWORK", "USDT network").strip()
+        if not address:
+            await _safe_edit_text(
+                update,
+                "Binance payment is not configured. Please contact admin." if english else "Pembayaran Binance belum dikonfigurasi. Silakan hubungi admin.",
+                reply_markup=_back_keyboard("gemini:buy"),
+            )
+            return
+        text = (
+            f"<b>Binance USDT Payment</b>\n\nAmount: <b>0.60 USDT</b>\nNetwork: <b>{_safe_html(network)}</b>\nAddress:\n<code>{_safe_html(address)}</code>\n\nAfter transfer, send the Binance transaction ID/hash."
+            if english
+            else f"<b>Pembayaran Binance USDT</b>\n\nJumlah: <b>0.60 USDT</b>\nNetwork: <b>{_safe_html(network)}</b>\nAlamat:\n<code>{_safe_html(address)}</code>\n\nSetelah transfer, kirim TXID/hash transaksi."
+        )
+    else:
+        note = os.getenv("QRIS_PAYMENT_NOTE", "Scan QRIS and send the transaction reference or screenshot.").strip()
+        text = (
+            f"<b>QRIS Payment</b>\n\nAmount: <b>Rp20.000</b>\n{_safe_html(note)}\n\nAfter payment, send the transaction reference or screenshot."
+            if english
+            else f"<b>Pembayaran QRIS</b>\n\nJumlah: <b>Rp20.000</b>\n{_safe_html(note)}\n\nSetelah membayar, kirim referensi transaksi atau screenshot."
+        )
+        qris_url = os.getenv("QRIS_IMAGE_URL", "").strip()
+    payment_buttons = []
+    if method == "qris" and qris_url:
+        payment_buttons.append([InlineKeyboardButton("📱 Open QRIS", url=qris_url)])
+    payment_buttons.append([InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="gemini:payment_methods")])
+    await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(payment_buttons))
+
+
+async def _notify_payment_admins(context: ContextTypes.DEFAULT_TYPE, payment_id: int) -> None:
+    with _db() as connection:
+        payment = connection.execute(
+            "SELECT p.*, u.username FROM payment_requests p LEFT JOIN users u ON u.user_id = p.user_id WHERE p.id = ?",
+            (payment_id,),
+        ).fetchone()
+    if not payment:
+        return
+    admin_keyboard = InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("✅ Verify", callback_data=f"payment:approve:{payment_id}"),
+            InlineKeyboardButton("❌ Reject", callback_data=f"payment:reject:{payment_id}"),
+        ]]
+    )
+    message = (
+        f"<b>Gemini payment verification</b>\n\nID: <code>#{payment_id}</code>\n"
+        f"User: <code>{payment['user_id']}</code> @{_safe_html(payment['username'] or '-')}\n"
+        f"Method: <b>{_safe_html(payment['method'])}</b>\nAmount: <b>{_safe_html(payment['amount'])}</b>\n"
+        f"Reference: <code>{_safe_html(payment['reference'])}</code>\nEmail: {_safe_html(payment['email'] or '-')}"
+    )
+    for admin_id in _admin_ids():
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=message, parse_mode="HTML", reply_markup=admin_keyboard)
+            if payment["evidence_file_id"]:
+                await context.bot.send_photo(chat_id=admin_id, photo=payment["evidence_file_id"], caption=f"Payment evidence #{payment_id}")
+        except TelegramError as exc:
+            logger.info("Could not notify admin %s for payment %s: %s", admin_id, payment_id, exc)
+
+
+async def _create_payment_request(update: Update, context: ContextTypes.DEFAULT_TYPE, reference: str, evidence_file_id: str | None = None) -> None:
+    user = _user_from_update(update)
+    if not user:
+        return
+    method = context.user_data.get("payment_method")
+    if method not in {"binance", "qris"}:
+        await _present_text(update, "Pilih metode pembayaran terlebih dahulu.", reply_markup=_back_keyboard("gemini:payment_methods"))
+        return
+    amount = "0.60 USDT" if method == "binance" else "Rp20.000"
+    with _db() as connection:
+        cursor = connection.execute(
+            "INSERT INTO payment_requests(user_id, method, amount, reference, evidence_file_id, email, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user["user_id"], method, amount, reference[:500], evidence_file_id, context.user_data.get("gemini_email"), datetime.now().isoformat()),
+        )
+        payment_id = cursor.lastrowid
+    await _notify_payment_admins(context, payment_id)
+    context.user_data.pop("step", None)
+    message = (
+        f"<b>Payment submitted</b>\n\nRequest: <code>#{payment_id}</code>\nYour payment is waiting for admin verification."
+        if _is_english(update)
+        else f"<b>Pembayaran terkirim</b>\n\nRequest: <code>#{payment_id}</code>\nPembayaran sedang menunggu verifikasi admin."
+    )
+    await _present_text(update, message, parse_mode="HTML", reply_markup=_back_keyboard("product:gemini"))
+
+
+async def _review_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_id: int, approved: bool) -> None:
+    admin = update.effective_user
+    if not admin or not _is_admin(admin.id):
+        await _safe_reply_text(update, "Admin access required.")
+        return
+    with _db() as connection:
+        payment = connection.execute("SELECT * FROM payment_requests WHERE id = ?", (payment_id,)).fetchone()
+        if not payment or payment["status"] != "pending":
+            await _safe_edit_text(update, "Payment is already reviewed or not found.", reply_markup=_back_keyboard("admin:menu"))
+            return
+        new_status = "approved" if approved else "rejected"
+        connection.execute(
+            "UPDATE payment_requests SET status = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ? AND status = 'pending'",
+            (new_status, datetime.now().isoformat(), admin.id, payment_id),
+        )
+    if not approved:
+        await context.bot.send_message(chat_id=payment["user_id"], text="Payment rejected. The transfer could not be verified." if _is_english(update) else "Pembayaran ditolak karena transfer tidak dapat diverifikasi.")
+        await _safe_edit_text(update, f"Payment #{payment_id} rejected.", reply_markup=_back_keyboard("admin:menu"))
+        return
+    try:
+        product = await _find_gemini_product()
+        order = await _create_gemini_order(payment["user_id"], product, payment["email"], charge_coins=False)
+        with _db() as connection:
+            connection.execute("UPDATE payment_requests SET provider_order_id = ? WHERE id = ?", (order.get("orderId"), payment_id))
+        delivered = order.get("deliveredKey") or ", ".join(order.get("deliveredKeys", []))
+        user_message = (
+            f"<b>Payment verified</b>\n\nGemini Pro order: <code>{_safe_html(order.get('orderId', '-'))}</code>\n"
+            + (f"Link/key: <code>{_safe_html(delivered)}</code>" if delivered else f"Status: <b>{_safe_html(order.get('status', 'pending'))}</b>")
+        )
+        await context.bot.send_message(chat_id=payment["user_id"], text=user_message, parse_mode="HTML", reply_markup=_back_keyboard("menu:main"))
+        await _safe_edit_text(update, f"Payment #{payment_id} verified and fulfilled.", reply_markup=_back_keyboard("admin:menu"))
+    except ProdSellerError as exc:
+        with _db() as connection:
+            connection.execute("UPDATE payment_requests SET status = 'provider_failed' WHERE id = ?", (payment_id,))
+        await context.bot.send_message(chat_id=payment["user_id"], text="Payment verified, but provider fulfillment is pending. Admin will follow up.")
+        await _safe_edit_text(update, f"Payment verified, provider fulfillment failed: {exc}", reply_markup=_back_keyboard("admin:menu"))
 async def _complete_gemini_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, email: str | None = None) -> None:
     user = _user_from_update(update)
     if not user:
@@ -1085,6 +1246,42 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         return
 
     if data == "gemini:buy":
+        try:
+            product = await _find_gemini_product()
+        except ProdSellerError:
+            await _safe_edit_text(update, "Gemini Pro is currently unavailable.", reply_markup=_back_keyboard())
+            return
+        if product.get("inStock") is False or product.get("stock") == 0:
+            await _safe_edit_text(update, "Gemini Pro is currently out of stock.", reply_markup=_back_keyboard())
+            return
+        if product.get("requiresEmailActivation"):
+            context.user_data["step"] = "gemini_payment_email"
+            await _safe_edit_text(
+                update,
+                "Send the activation email before choosing a payment method."
+                if _is_english(update)
+                else "Kirim email aktivasi sebelum memilih metode pembayaran.",
+                reply_markup=_back_keyboard("product:gemini"),
+            )
+        else:
+            await show_gemini_payment_methods(update, context)
+        return
+
+    if data == "gemini:payment_methods":
+        await show_gemini_payment_methods(update, context)
+        return
+
+    if data.startswith("gemini:pay:"):
+        await show_payment_instruction(update, context, data.split(":", 2)[2])
+        return
+
+    if data.startswith("payment:"):
+        parts = data.split(":")
+        if len(parts) == 3 and parts[1] in {"approve", "reject"} and parts[2].isdigit():
+            await _review_payment(update, context, int(parts[2]), parts[1] == "approve")
+        return
+
+    if data == "gemini:legacy_buy":
         try:
             product = await _find_gemini_product()
         except ProdSellerError:
@@ -1388,19 +1585,32 @@ async def start_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE, edit:
 async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_channel_membership(update, context):
         return
-    text = update.message.text.strip()
+    text = (update.message.text or update.message.caption or "").strip()
+    photo_file_id = update.message.photo[-1].file_id if update.message.photo else None
     step = context.user_data.get("step")
     country = context.user_data.get("country")
 
-    if step == "gemini_email":
+    if step == "gemini_payment_email":
         if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", text):
             await update.message.reply_text(
                 "Please send a valid email address." if _is_english(update) else "Silakan kirim alamat email yang valid.",
                 reply_markup=_back_keyboard(),
             )
             return
+        context.user_data["gemini_email"] = text
         context.user_data.pop("step", None)
-        await _complete_gemini_purchase(update, context, text)
+        await show_gemini_payment_methods(update, context)
+        return
+
+    if step in {"gemini_payment_binance", "gemini_payment_qris"}:
+        if not text and not photo_file_id:
+            await update.message.reply_text(
+                "Send a transaction reference or screenshot." if _is_english(update) else "Kirim referensi transaksi atau screenshot.",
+                reply_markup=_back_keyboard("gemini:payment_methods"),
+            )
+            return
+        reference = text or "Screenshot evidence"
+        await _create_payment_request(update, context, reference, photo_file_id)
         return
 
     if step == REDEEM_CODE:
@@ -1837,7 +2047,7 @@ def main() -> None:
     app.add_handler(CommandHandler("generate", generate_legacy))
 
     app.add_handler(CallbackQueryHandler(handle_dashboard_callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_flow))
+    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_text_flow))
 
     logger.info("Starting Yowes Telegram bot")
     app.run_polling(drop_pending_updates=True, timeout=60, bootstrap_retries=-1)
