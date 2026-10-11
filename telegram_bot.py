@@ -121,6 +121,20 @@ async def _stop_media_cleanup(application) -> None:
 
 REDEEM_CODE = 20
 ADMIN_ADD_COINS = 21
+ADMIN_SET_STOCK = 22
+ADMIN_SET_INFO = 23
+ADMIN_BROADCAST = 24
+
+# Broadcast category icons & labels
+# key: (emoji, indonesian_label, english_label)
+_BROADCAST_TYPES: dict[str, tuple[str, str, str]] = {
+    "flash":  ("⚡", "Flash Sale",      "Flash Sale"),
+    "bonus":  ("🎁", "Bonus / Hadiah",  "Bonus / Gift"),
+    "stock":  ("📦", "Update Stok",     "Stock Update"),
+    "info":   ("📢", "Info Umum",       "General Info"),
+    "promo":  ("🔥", "Promo Spesial",   "Special Promo"),
+    "custom": ("✏️", "Pesan Kustom",    "Custom Message"),
+}
 
 
 def _db() -> sqlite3.Connection:
@@ -202,6 +216,8 @@ def init_database() -> None:
                 ("gemini_binance_price_usdt", "0.60"),
                 ("checkin_reward", "1"),
                 ("referral_reward", "2"),
+                ("gemini_manual_stock", "0"),
+                ("gemini_info", ""),
             ],
         )
         for column, definition in (
@@ -408,6 +424,53 @@ async def _create_gemini_order(
     return order
 
 
+async def _broadcast_announcement(
+    context: ContextTypes.DEFAULT_TYPE,
+    broadcast_type: str,
+    message_text: str,
+) -> int:
+    """Broadcast a free-form announcement to every registered user.
+
+    Returns the number of users successfully notified. A formatted
+    header (emoji + category label) is prepended automatically and
+    adapts to each user's language preference.
+    """
+    with _db() as connection:
+        users = connection.execute("SELECT user_id, language FROM users").fetchall()
+
+    emoji, label_id, label_en = _BROADCAST_TYPES.get(
+        broadcast_type, ("📢", "Info Umum", "General Info")
+    )
+    sent = 0
+    for user in users:
+        label = label_en if user["language"] == "en" else label_id
+        full_message = f"{emoji} *{label}*\n\n{message_text}"
+        try:
+            await context.bot.send_message(
+                chat_id=user["user_id"],
+                text=full_message,
+                parse_mode="Markdown",
+            )
+            sent += 1
+        except RetryAfter as exc:
+            await asyncio.sleep(exc.retry_after)
+            try:
+                await context.bot.send_message(
+                    chat_id=user["user_id"],
+                    text=full_message,
+                    parse_mode="Markdown",
+                )
+                sent += 1
+            except TelegramError as retry_err:
+                logger.info(
+                    "Broadcast skipped for user %s (retry): %s",
+                    user["user_id"], retry_err,
+                )
+        except TelegramError as exc:
+            logger.info("Broadcast skipped for user %s: %s", user["user_id"], exc)
+    return sent
+
+
 async def _broadcast_redeem_code(
     context: ContextTypes.DEFAULT_TYPE,
     code: str,
@@ -464,6 +527,14 @@ def _set_setting(name: str, value: int) -> None:
         connection.execute(
             "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (name, str(value)),
+        )
+
+
+def _set_setting_text(name: str, value: str) -> None:
+    with _db() as connection:
+        connection.execute(
+            "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (name, value),
         )
 
 
@@ -961,21 +1032,34 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not _is_admin(update.effective_user.id if update.effective_user else None):
         await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard())
         return
+    gemini_stock_count = _setting("gemini_manual_stock", 0)
+    gemini_info_preview = _setting_text("gemini_info", "")
+    info_preview = (gemini_info_preview[:40] + "…") if len(gemini_info_preview) > 40 else (gemini_info_preview or "-")
     if _is_english(update):
         text = (
-            f"*Admin Settings*\n\nCanva Doc price: {_setting('doc_price', 3)} 🪙\n"
-            f"Gemini Pro price: {_setting('gemini_price', 20)} 🪙\nCustomer price: {_format_idr(_setting('gemini_price_idr', 15000))}\n"
-            f"QRIS price: {_format_idr(_setting('gemini_qris_price_idr', 20000))}\nBinance price: {_setting_text('gemini_binance_price_usdt', '0.60')} USDT\n"
+            f"*Admin Settings*\n\n"
+            f"Canva Doc price: {_setting('doc_price', 3)} 🪙\n"
+            f"Gemini Pro price: {_setting('gemini_price', 20)} 🪙\n"
+            f"Customer price: {_format_idr(_setting('gemini_price_idr', 15000))}\n"
+            f"QRIS price: {_format_idr(_setting('gemini_qris_price_idr', 20000))}\n"
+            f"Binance price: {_setting_text('gemini_binance_price_usdt', '0.60')} USDT\n"
             f"Check-in reward: {_setting('checkin_reward', 1)} 🪙\n"
-            f"Referral reward: {_setting('referral_reward', 2)} 🪙"
+            f"Referral reward: {_setting('referral_reward', 2)} 🪙\n\n"
+            f"📦 Gemini Stock: *{gemini_stock_count}* units\n"
+            f"ℹ️ Gemini Info: _{info_preview}_"
         )
     else:
         text = (
-            f"*Admin Settings*\n\nHarga Canva Doc: {_setting('doc_price', 3)} 🪙\n"
-            f"Harga Gemini Pro: {_setting('gemini_price', 20)} 🪙\nHarga pelanggan: {_format_idr(_setting('gemini_price_idr', 15000))}\n"
-            f"Harga QRIS: {_format_idr(_setting('gemini_qris_price_idr', 20000))}\nHarga Binance: {_setting_text('gemini_binance_price_usdt', '0.60')} USDT\n"
+            f"*Admin Settings*\n\n"
+            f"Harga Canva Doc: {_setting('doc_price', 3)} 🪙\n"
+            f"Harga Gemini Pro: {_setting('gemini_price', 20)} 🪙\n"
+            f"Harga pelanggan: {_format_idr(_setting('gemini_price_idr', 20000))}\n"
+            f"Harga QRIS: {_format_idr(_setting('gemini_qris_price_idr', 20000))}\n"
+            f"Harga Binance: {_setting_text('gemini_binance_price_usdt', '0.60')} USDT\n"
             f"Reward check-in: {_setting('checkin_reward', 1)} 🪙\n"
-            f"Reward referral: {_setting('referral_reward', 2)} 🪙"
+            f"Reward referral: {_setting('referral_reward', 2)} 🪙\n\n"
+            f"📦 Stok Gemini: *{gemini_stock_count}* unit\n"
+            f"ℹ️ Info Gemini: _{info_preview}_"
         )
     keyboard = InlineKeyboardMarkup(
         [
@@ -983,7 +1067,9 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             [InlineKeyboardButton("🏷️ Gemini Customer Prices" if _is_english(update) else "🏷️ Harga Customer Gemini", callback_data="admin:gemini_prices")],
             [InlineKeyboardButton("🎟️ Create Redeem Code" if _is_english(update) else "🎟️ Buat Redeem Code", callback_data="admin:redeem")],
             [InlineKeyboardButton("➕ Grant User Coins" if _is_english(update) else "➕ Tambah Coin User", callback_data="admin:addcoins")],
-            [InlineKeyboardButton("📦 Manage Gemini Stock" if _is_english(update) else "📦 Kelola Stok Gemini", callback_data="admin:stock")],
+            [InlineKeyboardButton("📦 Set Gemini Stock" if _is_english(update) else "📦 Set Stok Gemini", callback_data="admin:stock")],
+            [InlineKeyboardButton("ℹ️ Set Gemini Info" if _is_english(update) else "ℹ️ Set Info Gemini", callback_data="admin:info")],
+            [InlineKeyboardButton("📢 Broadcast" if _is_english(update) else "📢 Kirim Pengumuman", callback_data="admin:broadcast")],
             [InlineKeyboardButton("💳 Provider Balance" if _is_english(update) else "💳 Saldo Provider", callback_data="admin:provider_balance")],
             [InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="menu:main")],
         ]
@@ -1015,14 +1101,35 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
     price = _setting("gemini_price", 20)
     customer_price_idr = _setting("gemini_price_idr", 15000)
     english = _language(update) == "en"
+    gemini_info = _setting_text("gemini_info", "")
+    # Build the info block shown in the purchase chat
+    info_block = f"\n\n{_safe_html(gemini_info)}" if gemini_info.strip() else ""
     if not os.getenv("PRODSELLER_API_KEY", "").strip() or os.getenv("PRODSELLER_API_KEY", "").startswith("psk_your_"):
-        stock = _gemini_stock_count()
-        text = (
-            f"*Gemini Pro 18 Months*\n\nPrice: *{price} 🪙*\nStock available: *{stock}*\n\nContact admin for activation."
-            if english
-            else f"*Gemini Pro 18 Bulan*\n\nHarga: *{price} 🪙*\nStok tersedia: *{stock}*\n\nHubungi admin untuk proses aktivasi akun."
+        stock = _setting("gemini_manual_stock", 0)
+        stock_label = str(stock) if stock > 0 else ("Available" if english else "Tersedia")
+        if english:
+            text = (
+                f"<b>Gemini Pro 18 Months (link)</b>\n\n"
+                f"Customer price: <b>{_format_idr(customer_price_idr)}</b>\n"
+                f"Coin price: <b>{price} coins</b>\n"
+                f"Stock: <b>{_safe_html(stock_label)}</b>"
+                f"{info_block}"
+            )
+        else:
+            text = (
+                f"<b>Gemini Pro 18 Bulan (link)</b>\n\n"
+                f"Harga pelanggan: <b>{_format_idr(customer_price_idr)}</b>\n"
+                f"Harga coin: <b>{price} coin</b>\n"
+                f"Stok: <b>{_safe_html(stock_label)}</b>"
+                f"{info_block}"
+            )
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("🛒 Buy Gemini Pro" if english else "🛒 Beli Gemini Pro", callback_data="gemini:buy")],
+                [InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="menu:main")],
+            ]
         )
-        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=_back_keyboard())
+        await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=keyboard)
         return
     try:
         provider_product = await _find_gemini_product()
@@ -1040,8 +1147,8 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
         f"<b>{_safe_html(provider_product.get('name', 'Gemini Pro'))}</b>\n\n"
         f"{'Customer price' if english else 'Harga pelanggan'}: <b>{_format_idr(customer_price_idr)}</b>\n"
         f"{'Coin price' if english else 'Harga coin'}: <b>{price} coins</b>\n"
-        f"{'Stock' if english else 'Stok'}: <b>{_safe_html(stock_text)}</b>\n\n"
-        f"{_safe_html(provider_product.get('description', ''))}"
+        f"{'Stock' if english else 'Stok'}: <b>{_safe_html(stock_text)}</b>"
+        f"{info_block}"
     )
     keyboard = InlineKeyboardMarkup(
         [
@@ -1523,35 +1630,116 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         if not _is_admin(update.effective_user.id if update.effective_user else None):
             await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
             return
-        with _db() as connection:
-            stock = connection.execute(
-                "SELECT id, link, description FROM gemini_stock WHERE active = 1 ORDER BY id DESC LIMIT 10"
-            ).fetchall()
-        if stock:
-            lines = [f"• #{item['id']} — {item['description']}\n  {item['link']}" for item in stock]
-            title = "Active Gemini Stock" if _is_english(update) else "Stok Gemini Aktif"
-            text = f"*{title}: {_gemini_stock_count()}*\n\n" + "\n".join(lines)
+        current_stock = _setting("gemini_manual_stock", 0)
+        if _is_english(update):
+            text = (
+                f"*📦 Gemini Stock Management*\n\n"
+                f"Current stock: *{current_stock} units*\n\n"
+                "Send a number to update the stock count.\n"
+                "Example: `15`"
+            )
         else:
-            text = "*Active Gemini Stock: 0*\n\nNo stock available." if _is_english(update) else "*Stok Gemini Aktif: 0*\n\nBelum ada stok."
+            text = (
+                f"*📦 Kelola Stok Gemini*\n\n"
+                f"Stok saat ini: *{current_stock} unit*\n\n"
+                "Kirim angka untuk memperbarui jumlah stok.\n"
+                "Contoh: `15`"
+            )
+        context.user_data["step"] = ADMIN_SET_STOCK
         keyboard = InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("➕ Add Stock" if _is_english(update) else "➕ Tambah Stok", callback_data="admin:addstock")],
-                [InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="admin:menu")],
-            ]
+            [[InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="admin:menu")]]
         )
         await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=keyboard)
         return
 
-    if data == "admin:addstock":
+    if data == "admin:info":
         if not _is_admin(update.effective_user.id if update.effective_user else None):
-            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:stock"))
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
             return
-        context.user_data["step"] = "admin_stock"
+        current_info = _setting_text("gemini_info", "")
+        preview = current_info if current_info.strip() else ("-" if _is_english(update) else "-")
+        if _is_english(update):
+            text = (
+                f"*ℹ️ Gemini Product Info*\n\n"
+                f"Current info text:\n_{preview}_\n\n"
+                "Send the new info text to display in the Gemini Pro purchase chat.\n"
+                "Send `-` to clear the info."
+            )
+        else:
+            text = (
+                f"*ℹ️ Info Produk Gemini*\n\n"
+                f"Teks info saat ini:\n_{preview}_\n\n"
+                "Kirim teks info baru yang akan ditampilkan di chat pembelian Gemini Pro.\n"
+                "Kirim `-` untuk menghapus info."
+            )
+        context.user_data["step"] = ADMIN_SET_INFO
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="admin:menu")]]
+        )
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=keyboard)
+        return
+
+    if data == "admin:broadcast":
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
+            return
+        english = _is_english(update)
+        with _db() as connection:
+            total_users = connection.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+        if english:
+            text = (
+                f"*📢 Broadcast Announcement*\n\n"
+                f"Registered users: *{total_users}*\n\n"
+                "Choose an announcement category:"
+            )
+        else:
+            text = (
+                f"*📢 Kirim Pengumuman*\n\n"
+                f"Total pengguna terdaftar: *{total_users}*\n\n"
+                "Pilih kategori pengumuman:"
+            )
+        type_rows = []
+        items = list(_BROADCAST_TYPES.items())
+        for i in range(0, len(items), 2):
+            row = []
+            for key, (emoji, label_id, label_en) in items[i : i + 2]:
+                label = label_en if english else label_id
+                row.append(InlineKeyboardButton(f"{emoji} {label}", callback_data=f"admin:broadcast_type:{key}"))
+            type_rows.append(row)
+        type_rows.append([InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="admin:menu")])
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(type_rows))
+        return
+
+    if data.startswith("admin:broadcast_type:"):
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
+            return
+        broadcast_type = data.split(":", 2)[2]
+        if broadcast_type not in _BROADCAST_TYPES:
+            await _safe_edit_text(update, "Kategori tidak valid.", reply_markup=_back_keyboard("admin:broadcast"))
+            return
+        english = _is_english(update)
+        emoji, label_id, label_en = _BROADCAST_TYPES[broadcast_type]
+        label = label_en if english else label_id
+        context.user_data["broadcast_type"] = broadcast_type
+        context.user_data["step"] = ADMIN_BROADCAST
+        if english:
+            text = (
+                f"*{emoji} {label}*\n\n"
+                "Type the announcement message to send to all users.\n\n"
+                "_Tip: use \\*bold\\* for bold text, or add emojis for emphasis._\n\n"
+                "Your message will be sent with the category header above it."
+            )
+        else:
+            text = (
+                f"*{emoji} {label}*\n\n"
+                "Ketik isi pesan pengumuman yang akan dikirim ke semua pengguna.\n\n"
+                "_Tip: gunakan \\*teks\\* untuk *bold*, atau tambahkan emoji agar lebih menarik._\n\n"
+                "Pesan akan dikirim dengan header kategori di atasnya."
+            )
         await _safe_edit_text(
-            update,
-            "Send one stock item per message:\n`JIO_LINK | DESCRIPTION`\n\nExample:\n`https://jio.example/item-001 | Gemini Pro 18 months - personal account`" if _is_english(update) else "Kirim satu stok per pesan dengan format:\n`LINK_JIO | DESKRIPSI`\n\nContoh:\n`https://jio.example/item-001 | Gemini Pro 18 bulan - akun personal`",
-            parse_mode="Markdown",
-            reply_markup=_back_keyboard("admin:stock"),
+            update, text, parse_mode="Markdown",
+            reply_markup=_back_keyboard("admin:broadcast"),
         )
         return
 
@@ -1743,23 +1931,89 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await show_main_menu(update, context)
         return
 
-    if step == "admin_stock":
+    if step == ADMIN_BROADCAST:
         if not _is_admin(update.effective_user.id if update.effective_user else None):
             return
-        if "|" not in text:
-            await update.message.reply_text("Format tidak valid. Gunakan: `LINK_JIO | DESKRIPSI`", parse_mode="Markdown")
-            return
-        link, description = (part.strip() for part in text.split("|", 1))
-        if not link.startswith(("https://", "http://")) or not description:
-            await update.message.reply_text("Link harus diawali http:// atau https:// dan deskripsi wajib diisi.")
-            return
-        with _db() as connection:
-            connection.execute(
-                "INSERT INTO gemini_stock(link, description, created_at) VALUES (?, ?, ?)",
-                (link, description, datetime.now().isoformat()),
+        broadcast_type = context.user_data.get("broadcast_type", "info")
+        if not text:
+            await update.message.reply_text(
+                "❌ Message cannot be empty. Send the announcement text."
+                if _is_english(update)
+                else "❌ Pesan tidak boleh kosong. Kirim teks pengumuman.",
             )
+            return
+        if len(text) > 3000:
+            await update.message.reply_text(
+                "❌ Message too long (max 3000 characters)."
+                if _is_english(update)
+                else "❌ Pesan terlalu panjang (maksimal 3000 karakter).",
+            )
+            return
+        emoji, label_id, label_en = _BROADCAST_TYPES.get(broadcast_type, ("📢", "Info", "Info"))
+        label = label_en if _is_english(update) else label_id
+        await update.message.reply_text(
+            f"⏳ Sending *{emoji} {label}* broadcast\u2026 Please wait."
+            if _is_english(update)
+            else f"⏳ Mengirim broadcast *{emoji} {label}*\u2026 Harap tunggu.",
+            parse_mode="Markdown",
+        )
+        sent = await _broadcast_announcement(context, broadcast_type, text)
         context.user_data.pop("step", None)
-        await update.message.reply_text(f"Stok Gemini berhasil ditambahkan. Total stok aktif: *{_gemini_stock_count()}*.", parse_mode="Markdown")
+        context.user_data.pop("broadcast_type", None)
+        await update.message.reply_text(
+            f"✅ Broadcast sent to *{sent}* user(s)."
+            if _is_english(update)
+            else f"✅ Broadcast berhasil dikirim ke *{sent}* pengguna.",
+            parse_mode="Markdown",
+        )
+        await show_admin_menu(update, context)
+        return
+
+    if step == ADMIN_SET_STOCK:
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            return
+        if not text.isdigit() or int(text) < 0:
+            await update.message.reply_text(
+                "❌ Invalid input. Send a whole number (e.g. `15`)."
+                if _is_english(update)
+                else "❌ Input tidak valid. Kirim angka bulat (contoh: `15`).",
+                parse_mode="Markdown",
+            )
+            return
+        new_stock = int(text)
+        _set_setting("gemini_manual_stock", new_stock)
+        context.user_data.pop("step", None)
+        await update.message.reply_text(
+            f"✅ Gemini stock updated to *{new_stock}* units."
+            if _is_english(update)
+            else f"✅ Stok Gemini berhasil diperbarui menjadi *{new_stock}* unit.",
+            parse_mode="Markdown",
+        )
+        await show_admin_menu(update, context)
+        return
+
+    if step == ADMIN_SET_INFO:
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            return
+        if len(text) > 2000:
+            await update.message.reply_text(
+                "❌ Info text is too long (max 2000 characters)."
+                if _is_english(update)
+                else "❌ Teks info terlalu panjang (maksimal 2000 karakter).",
+            )
+            return
+        new_info = "" if text.strip() == "-" else text.strip()
+        _set_setting_text("gemini_info", new_info)
+        context.user_data.pop("step", None)
+        if new_info:
+            reply = (
+                f"✅ Gemini info updated.\n\n_{new_info}_"
+                if _is_english(update)
+                else f"✅ Info Gemini berhasil diperbarui.\n\n_{new_info}_"
+            )
+        else:
+            reply = "✅ Gemini info cleared." if _is_english(update) else "✅ Info Gemini berhasil dihapus."
+        await update.message.reply_text(reply, parse_mode="Markdown")
         await show_admin_menu(update, context)
         return
 
