@@ -1046,19 +1046,20 @@ async def show_payment_instruction(update: Update, context: ContextTypes.DEFAULT
     context.user_data["payment_method"] = method
     context.user_data["step"] = f"gemini_payment_{method}"
     if method == "binance":
-        address = os.getenv("BINANCE_PAYMENT_ADDRESS", "").strip()
-        network = os.getenv("BINANCE_NETWORK", "USDT network").strip()
-        if not address:
+        account = os.getenv("BINANCE_ACCOUNT_ID", "").strip() or os.getenv("BINANCE_PAYMENT_ADDRESS", "").strip()
+        network = os.getenv("BINANCE_NETWORK", "").strip()
+        if not account or account.startswith("your_"):
             await _safe_edit_text(
                 update,
-                "Binance payment is not configured. Please contact admin." if english else "Pembayaran Binance belum dikonfigurasi. Silakan hubungi admin.",
+                "Binance account payment is not configured. Please contact admin." if english else "Akun pembayaran Binance belum dikonfigurasi. Silakan hubungi admin.",
                 reply_markup=_back_keyboard("gemini:buy"),
             )
             return
+        network_line = f"\nNetwork: <b>{_safe_html(network)}</b>" if network else ""
         text = (
-            f"<b>Binance USDT Payment</b>\n\nAmount: <b>0.60 USDT</b>\nNetwork: <b>{_safe_html(network)}</b>\nAddress:\n<code>{_safe_html(address)}</code>\n\nAfter transfer, send the Binance transaction ID/hash."
+            f"<b>Direct Binance Transfer</b>\n\nAmount: <b>0.60 USDT</b>\nBinance account:\n<code>{_safe_html(account)}</code>{network_line}\n\nTransfer USDT directly to this admin Binance account, then send the transaction ID/hash."
             if english
-            else f"<b>Pembayaran Binance USDT</b>\n\nJumlah: <b>0.60 USDT</b>\nNetwork: <b>{_safe_html(network)}</b>\nAlamat:\n<code>{_safe_html(address)}</code>\n\nSetelah transfer, kirim TXID/hash transaksi."
+            else f"<b>Transfer Langsung Binance</b>\n\nJumlah: <b>0.60 USDT</b>\nAkun Binance admin:\n<code>{_safe_html(account)}</code>{network_line}\n\nTransfer USDT langsung ke akun Binance admin ini, lalu kirim TXID/hash transaksi."
         )
     else:
         note = os.getenv("QRIS_PAYMENT_NOTE", "Scan QRIS and send the transaction reference or screenshot.").strip()
