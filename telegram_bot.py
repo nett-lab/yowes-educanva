@@ -176,7 +176,13 @@ def init_database() -> None:
         )
         connection.executemany(
             "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)",
-            [("doc_price", "3"), ("gemini_price", "20"), ("checkin_reward", "1"), ("referral_reward", "2")],
+            [
+                ("doc_price", "3"),
+                ("gemini_price", "20"),
+                ("gemini_price_idr", "15000"),
+                ("checkin_reward", "1"),
+                ("referral_reward", "2"),
+            ],
         )
 
 
@@ -196,6 +202,10 @@ def _setting(name: str, default: int) -> int:
         return int(row["value"]) if row else default
     except (TypeError, ValueError):
         return default
+
+
+def _format_idr(amount: int) -> str:
+    return f"Rp{amount:,}".replace(",", ".")
 
 
 def _ensure_user(user_id: int, username: str = "") -> sqlite3.Row:
@@ -453,6 +463,13 @@ def _safe_edit_text(update: Update, text: str, **kwargs):
     if update.message is not None:
         return update.message.reply_text(text, **kwargs)
     return None
+
+
+async def _present_text(update: Update, text: str, **kwargs) -> None:
+    if update.callback_query is not None:
+        await _safe_edit_text(update, text, **kwargs)
+    else:
+        await _safe_reply_text(update, text, **kwargs)
 
 
 async def _send_generated_file(
@@ -947,6 +964,7 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
         await start_wizard(update, context, edit=True)
         return
     price = _setting("gemini_price", 20)
+    customer_price_idr = _setting("gemini_price_idr", 15000)
     english = _language(update) == "en"
     if not os.getenv("PRODSELLER_API_KEY", "").strip() or os.getenv("PRODSELLER_API_KEY", "").startswith("psk_your_"):
         stock = _gemini_stock_count()
@@ -971,8 +989,9 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
     stock_text = str(provider_stock) if provider_stock is not None else ("Available" if provider_product.get("inStock") else "Out of stock")
     text = (
         f"<b>{_safe_html(provider_product.get('name', 'Gemini Pro'))}</b>\n\n"
-        f"Provider price: <b>{_safe_html(provider_product.get('price', '-'))} USDT</b>\n"
-        f"Your price: <b>{price} coins</b>\nStock: <b>{_safe_html(stock_text)}</b>\n\n"
+        f"{'Customer price' if english else 'Harga pelanggan'}: <b>{_format_idr(customer_price_idr)}</b>\n"
+        f"{'Coin price' if english else 'Harga coin'}: <b>{price} coins</b>\n"
+        f"{'Stock' if english else 'Stok'}: <b>{_safe_html(stock_text)}</b>\n\n"
         f"{_safe_html(provider_product.get('description', ''))}"
     )
     keyboard = InlineKeyboardMarkup(
@@ -998,7 +1017,7 @@ async def _complete_gemini_purchase(update: Update, context: ContextTypes.DEFAUL
             if _is_english(update)
             else "Gemini Pro sementara tidak tersedia karena saldo provider tidak mencukupi. Silakan coba lagi nanti."
         )
-        await _safe_reply_text(update, message, reply_markup=_back_keyboard())
+        await _present_text(update, message, reply_markup=_back_keyboard())
         logger.info("Gemini order blocked by provider balance: %s", exc)
         return
     except ProdSellerError as exc:
@@ -1007,7 +1026,7 @@ async def _complete_gemini_purchase(update: Update, context: ContextTypes.DEFAUL
             message = "Saldo coin tidak cukup untuk membeli Gemini Pro." if not _is_english(update) else "Your coin balance is not enough to buy Gemini Pro."
         else:
             message = "Gemini Pro order failed. Your coins were refunded." if not _is_english(update) else "The Gemini Pro order failed. Your coins were refunded."
-        await _safe_reply_text(update, message, reply_markup=_back_keyboard())
+        await _present_text(update, message, reply_markup=_back_keyboard())
         logger.info("Gemini order failed: %s", exc)
         return
     status = order.get("status", "pending")
@@ -1019,7 +1038,7 @@ async def _complete_gemini_purchase(update: Update, context: ContextTypes.DEFAUL
             f"<b>Gemini Pro order created</b>\n\nOrder: <code>{_safe_html(order.get('orderId', '-'))}</code>\n"
             f"Status: <b>{_safe_html(status)}</b>\n\nThe provider will complete activation shortly."
         )
-    await _safe_reply_text(update, message, parse_mode="HTML", reply_markup=_back_keyboard())
+    await _present_text(update, message, parse_mode="HTML", reply_markup=_back_keyboard())
 
 
 async def schools(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
