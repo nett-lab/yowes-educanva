@@ -26,6 +26,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.request import HTTPXRequest
 import requests
 
 from countries import get_country, list_countries
@@ -90,6 +91,7 @@ async def _start_media_cleanup(application) -> None:
     global _media_cleanup_task
     _delete_expired_media()
     _media_cleanup_task = asyncio.create_task(_media_cleanup_loop())
+    logger.info("Telegram API initialized; media cleanup is active")
 
 
 async def _stop_media_cleanup(application) -> None:
@@ -1743,9 +1745,25 @@ def main() -> None:
     if not token:
         raise RuntimeError("BOT_TOKEN is not set. Add it to your environment or .env file before starting the bot.")
 
+    request = HTTPXRequest(
+        connect_timeout=30.0,
+        read_timeout=45.0,
+        write_timeout=45.0,
+        pool_timeout=30.0,
+        media_write_timeout=60.0,
+    )
+    get_updates_request = HTTPXRequest(
+        connect_timeout=30.0,
+        read_timeout=75.0,
+        write_timeout=45.0,
+        pool_timeout=30.0,
+        media_write_timeout=60.0,
+    )
     app = (
         ApplicationBuilder()
         .token(token)
+        .request(request)
+        .get_updates_request(get_updates_request)
         .post_init(_start_media_cleanup)
         .post_shutdown(_stop_media_cleanup)
         .build()
@@ -1761,8 +1779,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(handle_dashboard_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_flow))
 
-    logger.info("Yowes Telegram bot started successfully")
-    app.run_polling(drop_pending_updates=True)
+    logger.info("Starting Yowes Telegram bot")
+    app.run_polling(drop_pending_updates=True, timeout=60, bootstrap_retries=-1)
 
 
 if __name__ == "__main__":

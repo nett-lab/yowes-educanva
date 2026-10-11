@@ -500,6 +500,7 @@ Start-ScheduledTask -TaskName 'Yowes Telegram Bot'
 | Bot tidak merespons | Pastikan hanya satu instance bot yang aktif dan internet RDP tidak diblokir firewall/proxy. |
 | Dokumen tersimpan tetapi tidak terkirim | Jalankan bot foreground untuk melihat error Telegram, lalu pastikan token masih valid dan bot tidak berjalan di server lain. |
 | `ModuleNotFoundError` | Aktifkan `.venv` lalu ulangi `python -m pip install -r requirements.txt`. |
+| `TimedOut` saat `Bootstrap Initialize Application` | Versi bot sudah memakai timeout jaringan yang lebih longgar dan retry bootstrap otomatis. Pastikan outbound HTTPS ke `api.telegram.org` diizinkan, lalu restart bot. |
 
 ## Deploy di Botkeep
 
