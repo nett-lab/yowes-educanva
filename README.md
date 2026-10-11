@@ -265,6 +265,7 @@ A Telegram bot is also available for lightweight, on-the-go document generation.
 - Persistent coin balance and activity storage in SQLite
 - Coin transaction history with charges, rewards, refunds, and admin grants
 - Gemini Pro stock management with JIO links, descriptions, and live stock count
+- Optional Prodseller API integration for live Gemini products, stock, and orders
 - Automatic localized redeem-code announcements with a one-tap redeem button
 - Mandatory subscription gate for `t.me/canvaproteam04` before using bot features
 - Automatic permanent deletion of generated Telegram images after 10 minutes
@@ -285,9 +286,15 @@ Then edit `.env` and replace the placeholder value:
 ```env
 BOT_TOKEN=your_bot_token_here
 ADMIN_IDS=123456789
+PRODSELLER_API_KEY=psk_your_api_key_here
+PRODSELLER_PRODUCT_ID=
+PRODSELLER_PRODUCT_NAME=Gemini Pro
+PRODSELLER_BASE_URL=https://prodseller.com/v1
 ```
 
 `ADMIN_IDS` is a comma-separated list of Telegram numeric user IDs allowed to open **Admin Settings**. Use your own Telegram ID; never use a username or share the bot token.
+
+`PRODSELLER_API_KEY` must be stored as a Botkeep secret. `PRODSELLER_PRODUCT_ID` is recommended because it selects one exact Gemini product; when empty, the bot searches active products using `PRODSELLER_PRODUCT_NAME`. The provider's live stock and price are displayed to users, while the bot's configured coin price is charged locally.
 
 Or set it directly in the environment:
 
@@ -341,6 +348,17 @@ generate - Generate documents with the quick command format
 - The bot generates PNG files in `output/telegram/`.
 - The same country and school validation rules used by the MCP server are applied here.
 - For best results, wrap school names and position titles in quotes when they contain spaces.
+
+### Prodseller Gemini integration
+
+When `PRODSELLER_API_KEY` is configured, the Gemini menu uses:
+
+- `GET /v1/products` to find the configured Gemini product and show live stock.
+- `POST /v1/orders` to create an order with `X-API-Key` and a unique `Idempotency-Key`.
+- An activation email only when the product declares `requiresEmailActivation`.
+- Automatic coin refund when the provider rejects an order.
+
+If the API key is not configured, the existing local Gemini stock menu remains available and no provider request is made. Never place the Prodseller API key in `.env` committed to GitHub, README files, logs, or Telegram messages.
 
 ---
 

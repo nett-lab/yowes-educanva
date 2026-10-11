@@ -26,6 +26,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+import requests
 
 from countries import get_country, list_countries
 from mcp_server import generate_documents
@@ -41,6 +42,7 @@ REQUIRED_CHANNEL_URL = "https://t.me/canvaproteam04"
 MEDIA_RETENTION_SECONDS = 10 * 60
 MEDIA_CLEANUP_INTERVAL_SECONDS = 60
 _media_cleanup_task: asyncio.Task | None = None
+_prodseller_products_cache: tuple[float, list[dict]] = (0.0, [])
 
 COUNTRY_LABELS = {
     "uk": "🇬🇧 United Kingdom",
@@ -249,6 +251,91 @@ def _gemini_stock_count() -> int:
     with _db() as connection:
         row = connection.execute("SELECT COUNT(*) AS total FROM gemini_stock WHERE active = 1").fetchone()
     return int(row["total"])
+
+
+class ProdSellerError(RuntimeError):
+    """Safe provider error that never contains the API key."""
+
+
+def _prodseller_base_url() -> str:
+    return os.getenv("PRODSELLER_BASE_URL", "https://prodseller.com/v1").rstrip("/")
+
+
+def _prodseller_request_sync(method: str, path: str, **kwargs) -> dict:
+    api_key = os.getenv("PRODSELLER_API_KEY", "").strip()
+    if not api_key or api_key.startswith("psk_your_"):
+        raise ProdSellerError("ProdSeller API is not configured")
+    headers = {"X-API-Key": api_key, "Accept": "application/json"}
+    if method.upper() == "POST":
+        headers["Content-Type"] = "application/json"
+    headers.update(kwargs.pop("headers", {}))
+    try:
+        response = requests.request(
+            method,
+            f"{_prodseller_base_url()}{path}",
+            headers=headers,
+            timeout=20,
+            **kwargs,
+        )
+    except requests.RequestException as exc:
+        raise ProdSellerError("ProdSeller is temporarily unreachable") from exc
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise ProdSellerError("ProdSeller returned an invalid response") from exc
+    if not response.ok:
+        provider_message = payload.get("error") if isinstance(payload, dict) else None
+        logger.warning("ProdSeller request failed: status=%s error=%s", response.status_code, provider_message)
+        raise ProdSellerError(provider_message or f"ProdSeller request failed ({response.status_code})")
+    return payload
+
+
+async def _prodseller_products() -> list[dict]:
+    global _prodseller_products_cache
+    expires_at, cached = _prodseller_products_cache
+    if time.time() < expires_at:
+        return cached
+    payload = await asyncio.to_thread(_prodseller_request_sync, "GET", "/products")
+    products = payload.get("products", [])
+    _prodseller_products_cache = (time.time() + 60, products)
+    return products
+
+
+async def _find_gemini_product() -> dict:
+    product_id = os.getenv("PRODSELLER_PRODUCT_ID", "").strip()
+    product_name = os.getenv("PRODSELLER_PRODUCT_NAME", "Gemini Pro").strip().lower()
+    products = await _prodseller_products()
+    if product_id:
+        for product in products:
+            if str(product.get("id")) == product_id:
+                return product
+    matches = [product for product in products if product_name and product_name in str(product.get("name", "")).lower()]
+    if not matches:
+        raise ProdSellerError("Gemini Pro product was not found")
+    return matches[0]
+
+
+async def _create_gemini_order(user_id: int, product: dict, email: str | None = None) -> dict:
+    price = _setting("gemini_price", 20)
+    user = _ensure_user(user_id)
+    if not _spend_coins(user_id, price, "Gemini Pro purchase"):
+        raise ProdSellerError(f"Insufficient coin balance; requires {price} coins")
+    idempotency_key = f"gemini-{user_id}-{secrets.token_hex(12)}"
+    body = {"productId": product["id"], "quantity": 1}
+    if email:
+        body["email"] = email
+    try:
+        order = await asyncio.to_thread(
+            _prodseller_request_sync,
+            "POST",
+            "/orders",
+            json=body,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+    except ProdSellerError:
+        _add_coins(user_id, price, "Gemini Pro purchase refund")
+        raise
+    return order
 
 
 async def _broadcast_redeem_code(
@@ -830,18 +917,70 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
         await start_wizard(update, context, edit=True)
         return
     price = _setting("gemini_price", 20)
-    stock = _gemini_stock_count()
     english = _language(update) == "en"
-    await _safe_edit_text(
-        update,
-        (
+    if not os.getenv("PRODSELLER_API_KEY", "").strip() or os.getenv("PRODSELLER_API_KEY", "").startswith("psk_your_"):
+        stock = _gemini_stock_count()
+        text = (
             f"*Gemini Pro 18 Months*\n\nPrice: *{price} 🪙*\nStock available: *{stock}*\n\nContact admin for activation."
             if english
             else f"*Gemini Pro 18 Bulan*\n\nHarga: *{price} 🪙*\nStok tersedia: *{stock}*\n\nHubungi admin untuk proses aktivasi akun."
-        ),
-        parse_mode="Markdown",
-        reply_markup=_back_keyboard(),
+        )
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=_back_keyboard())
+        return
+    try:
+        provider_product = await _find_gemini_product()
+    except ProdSellerError as exc:
+        await _safe_edit_text(
+            update,
+            "Gemini Pro is temporarily unavailable. Please contact admin." if english else "Gemini Pro sedang tidak tersedia. Silakan hubungi admin.",
+            reply_markup=_back_keyboard(),
+        )
+        logger.info("Gemini product unavailable: %s", exc)
+        return
+    provider_stock = provider_product.get("stock")
+    stock_text = str(provider_stock) if provider_stock is not None else ("Available" if provider_product.get("inStock") else "Out of stock")
+    text = (
+        f"<b>{_safe_html(provider_product.get('name', 'Gemini Pro'))}</b>\n\n"
+        f"Provider price: <b>{_safe_html(provider_product.get('price', '-'))} USDT</b>\n"
+        f"Your price: <b>{price} coins</b>\nStock: <b>{_safe_html(stock_text)}</b>\n\n"
+        f"{_safe_html(provider_product.get('description', ''))}"
     )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🛒 Buy Gemini Pro" if english else "🛒 Beli Gemini Pro", callback_data="gemini:buy")],
+            [InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="menu:main")],
+        ]
+    )
+    context.user_data["gemini_product_id"] = provider_product.get("id")
+    await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=keyboard)
+
+
+async def _complete_gemini_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, email: str | None = None) -> None:
+    user = _user_from_update(update)
+    if not user:
+        return
+    try:
+        product = await _find_gemini_product()
+        order = await _create_gemini_order(user["user_id"], product, email)
+    except ProdSellerError as exc:
+        message = str(exc)
+        if "Insufficient coin" in message:
+            message = "Saldo coin tidak cukup untuk membeli Gemini Pro." if not _is_english(update) else "Your coin balance is not enough to buy Gemini Pro."
+        else:
+            message = "Gemini Pro order failed. Your coins were refunded." if not _is_english(update) else "The Gemini Pro order failed. Your coins were refunded."
+        await _safe_reply_text(update, message, reply_markup=_back_keyboard())
+        logger.info("Gemini order failed: %s", exc)
+        return
+    status = order.get("status", "pending")
+    delivered = order.get("deliveredKey") or ", ".join(order.get("deliveredKeys", []))
+    if delivered:
+        message = f"<b>Gemini Pro delivered</b>\n\nOrder: <code>{_safe_html(order.get('orderId', '-'))}</code>\nKey: <code>{_safe_html(delivered)}</code>"
+    else:
+        message = (
+            f"<b>Gemini Pro order created</b>\n\nOrder: <code>{_safe_html(order.get('orderId', '-'))}</code>\n"
+            f"Status: <b>{_safe_html(status)}</b>\n\nThe provider will complete activation shortly."
+        )
+    await _safe_reply_text(update, message, parse_mode="HTML", reply_markup=_back_keyboard())
 
 
 async def schools(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -885,6 +1024,28 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
 
     if data.startswith("product:"):
         await show_product(update, context, data.split(":", 1)[1])
+        return
+
+    if data == "gemini:buy":
+        try:
+            product = await _find_gemini_product()
+        except ProdSellerError:
+            await _safe_edit_text(update, "Gemini Pro is temporarily unavailable.", reply_markup=_back_keyboard())
+            return
+        if product.get("inStock") is False or product.get("stock") == 0:
+            await _safe_edit_text(update, "Gemini Pro is currently out of stock.", reply_markup=_back_keyboard())
+            return
+        if product.get("requiresEmailActivation"):
+            context.user_data["step"] = "gemini_email"
+            await _safe_edit_text(
+                update,
+                "Send the email address for activation. Your email is sent to the provider only for this order."
+                if _is_english(update)
+                else "Kirim alamat email untuk aktivasi. Email hanya dikirim ke provider untuk order ini.",
+                reply_markup=_back_keyboard(),
+            )
+        else:
+            await _complete_gemini_purchase(update, context)
         return
 
     if data == "wizard:document_types":
@@ -1168,6 +1329,17 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     text = update.message.text.strip()
     step = context.user_data.get("step")
     country = context.user_data.get("country")
+
+    if step == "gemini_email":
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", text):
+            await update.message.reply_text(
+                "Please send a valid email address." if _is_english(update) else "Silakan kirim alamat email yang valid.",
+                reply_markup=_back_keyboard(),
+            )
+            return
+        context.user_data.pop("step", None)
+        await _complete_gemini_purchase(update, context, text)
+        return
 
     if step == REDEEM_CODE:
         user = _user_from_update(update)
