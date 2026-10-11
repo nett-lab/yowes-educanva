@@ -184,6 +184,8 @@ def init_database() -> None:
                 email TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 provider_order_id TEXT,
+                user_chat_id INTEGER,
+                user_message_id INTEGER,
                 created_at TEXT NOT NULL,
                 reviewed_at TEXT,
                 reviewed_by INTEGER
@@ -202,6 +204,15 @@ def init_database() -> None:
                 ("referral_reward", "2"),
             ],
         )
+        for column, definition in (
+            ("user_chat_id", "INTEGER"),
+            ("user_message_id", "INTEGER"),
+        ):
+            try:
+                connection.execute(f"ALTER TABLE payment_requests ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
 
 
 def _admin_ids() -> set[int]:
@@ -501,11 +512,10 @@ def _safe_edit_text(update: Update, text: str, **kwargs):
     return None
 
 
-async def _present_text(update: Update, text: str, **kwargs) -> None:
+async def _present_text(update: Update, text: str, **kwargs):
     if update.callback_query is not None:
-        await _safe_edit_text(update, text, **kwargs)
-    else:
-        await _safe_reply_text(update, text, **kwargs)
+        return await _safe_edit_text(update, text, **kwargs)
+    return await _safe_reply_text(update, text, **kwargs)
 
 
 async def _send_generated_file(
@@ -1169,7 +1179,36 @@ async def _create_payment_request(update: Update, context: ContextTypes.DEFAULT_
         if _is_english(update)
         else f"<b>Pembayaran terkirim</b>\n\nRequest: <code>#{payment_id}</code>\nPembayaran sedang menunggu verifikasi admin."
     )
-    await _present_text(update, message, parse_mode="HTML", reply_markup=_back_keyboard("product:gemini"))
+    sent_message = await _present_text(update, message, parse_mode="HTML", reply_markup=_back_keyboard("product:gemini"))
+    if sent_message and getattr(sent_message, "chat_id", None) and getattr(sent_message, "message_id", None):
+        with _db() as connection:
+            connection.execute(
+                "UPDATE payment_requests SET user_chat_id = ?, user_message_id = ? WHERE id = ?",
+                (sent_message.chat_id, sent_message.message_id, payment_id),
+            )
+
+
+async def _update_user_payment_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    payment: sqlite3.Row,
+    text: str,
+    reply_markup=None,
+) -> None:
+    chat_id = payment["user_chat_id"]
+    message_id = payment["user_message_id"]
+    if chat_id and message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+            return
+        except TelegramError as exc:
+            logger.info("Could not edit payment message %s: %s", payment["id"], exc)
+    await context.bot.send_message(chat_id=payment["user_id"], text=text, parse_mode="HTML", reply_markup=reply_markup)
 
 
 async def _review_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_id: int, approved: bool) -> None:
@@ -1188,7 +1227,12 @@ async def _review_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
             (new_status, datetime.now().isoformat(), admin.id, payment_id),
         )
     if not approved:
-        await context.bot.send_message(chat_id=payment["user_id"], text="Payment rejected. The transfer could not be verified." if _is_english(update) else "Pembayaran ditolak karena transfer tidak dapat diverifikasi.")
+        await _update_user_payment_message(
+            context,
+            payment,
+            "<b>Payment rejected</b>\n\nThe transfer could not be verified." if _is_english(update) else "<b>Pembayaran ditolak</b>\n\nTransfer tidak dapat diverifikasi.",
+            _back_keyboard("product:gemini"),
+        )
         await _safe_edit_text(update, f"Payment #{payment_id} rejected.", reply_markup=_back_keyboard("admin:menu"))
         return
     try:
@@ -1201,12 +1245,19 @@ async def _review_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
             f"<b>Payment verified</b>\n\nGemini Pro order: <code>{_safe_html(order.get('orderId', '-'))}</code>\n"
             + (f"Link/key: <code>{_safe_html(delivered)}</code>" if delivered else f"Status: <b>{_safe_html(order.get('status', 'pending'))}</b>")
         )
-        await context.bot.send_message(chat_id=payment["user_id"], text=user_message, parse_mode="HTML", reply_markup=_back_keyboard("menu:main"))
+        await _update_user_payment_message(context, payment, user_message, _back_keyboard("menu:main"))
         await _safe_edit_text(update, f"Payment #{payment_id} verified and fulfilled.", reply_markup=_back_keyboard("admin:menu"))
     except ProdSellerError as exc:
         with _db() as connection:
             connection.execute("UPDATE payment_requests SET status = 'provider_failed' WHERE id = ?", (payment_id,))
-        await context.bot.send_message(chat_id=payment["user_id"], text="Payment verified, but provider fulfillment is pending. Admin will follow up.")
+        await _update_user_payment_message(
+            context,
+            payment,
+            "<b>Payment verified</b>\n\nProvider fulfillment is pending. Admin will follow up."
+            if _is_english(update)
+            else "<b>Pembayaran terverifikasi</b>\n\nPengiriman provider masih tertunda. Admin akan menindaklanjuti.",
+            _back_keyboard("menu:main"),
+        )
         await _safe_edit_text(update, f"Payment verified, provider fulfillment failed: {exc}", reply_markup=_back_keyboard("admin:menu"))
 async def _complete_gemini_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, email: str | None = None) -> None:
     user = _user_from_update(update)
