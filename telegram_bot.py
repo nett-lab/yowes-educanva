@@ -194,6 +194,8 @@ def init_database() -> None:
                 ("doc_price", "3"),
                 ("gemini_price", "20"),
                 ("gemini_price_idr", "15000"),
+                ("gemini_qris_price_idr", "20000"),
+                ("gemini_binance_price_usdt", "0.60"),
                 ("checkin_reward", "1"),
                 ("referral_reward", "2"),
             ],
@@ -216,6 +218,12 @@ def _setting(name: str, default: int) -> int:
         return int(row["value"]) if row else default
     except (TypeError, ValueError):
         return default
+
+
+def _setting_text(name: str, default: str) -> str:
+    with _db() as connection:
+        row = connection.execute("SELECT value FROM settings WHERE key = ?", (name,)).fetchone()
+    return str(row["value"]) if row else default
 
 
 def _format_idr(amount: int) -> str:
@@ -938,20 +946,23 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if _is_english(update):
         text = (
             f"*Admin Settings*\n\nCanva Doc price: {_setting('doc_price', 3)} 🪙\n"
-            f"Gemini Pro price: {_setting('gemini_price', 20)} 🪙\n"
+            f"Gemini Pro price: {_setting('gemini_price', 20)} 🪙\nCustomer price: {_format_idr(_setting('gemini_price_idr', 15000))}\n"
+            f"QRIS price: {_format_idr(_setting('gemini_qris_price_idr', 20000))}\nBinance price: {_setting_text('gemini_binance_price_usdt', '0.60')} USDT\n"
             f"Check-in reward: {_setting('checkin_reward', 1)} 🪙\n"
             f"Referral reward: {_setting('referral_reward', 2)} 🪙"
         )
     else:
         text = (
             f"*Admin Settings*\n\nHarga Canva Doc: {_setting('doc_price', 3)} 🪙\n"
-            f"Harga Gemini Pro: {_setting('gemini_price', 20)} 🪙\n"
+            f"Harga Gemini Pro: {_setting('gemini_price', 20)} 🪙\nHarga pelanggan: {_format_idr(_setting('gemini_price_idr', 15000))}\n"
+            f"Harga QRIS: {_format_idr(_setting('gemini_qris_price_idr', 20000))}\nHarga Binance: {_setting_text('gemini_binance_price_usdt', '0.60')} USDT\n"
             f"Reward check-in: {_setting('checkin_reward', 1)} 🪙\n"
             f"Reward referral: {_setting('referral_reward', 2)} 🪙"
         )
     keyboard = InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("💰 Set Prices" if _is_english(update) else "💰 Atur Harga", callback_data="admin:prices")],
+            [InlineKeyboardButton("🏷️ Gemini Customer Prices" if _is_english(update) else "🏷️ Harga Customer Gemini", callback_data="admin:gemini_prices")],
             [InlineKeyboardButton("🎟️ Create Redeem Code" if _is_english(update) else "🎟️ Buat Redeem Code", callback_data="admin:redeem")],
             [InlineKeyboardButton("➕ Grant User Coins" if _is_english(update) else "➕ Tambah Coin User", callback_data="admin:addcoins")],
             [InlineKeyboardButton("📦 Manage Gemini Stock" if _is_english(update) else "📦 Kelola Stok Gemini", callback_data="admin:stock")],
@@ -1026,6 +1037,8 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
 
 async def show_gemini_payment_methods(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     english = _is_english(update)
+    binance_price = _setting_text("gemini_binance_price_usdt", "0.60")
+    qris_price = _format_idr(_setting("gemini_qris_price_idr", 20000))
     text = (
         "<b>Choose payment method</b>\n\nSelect Binance USDT or QRIS. Your order is processed after admin verification."
         if english
@@ -1033,8 +1046,8 @@ async def show_gemini_payment_methods(update: Update, context: ContextTypes.DEFA
     )
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("💳 Binance · 0.60 USDT", callback_data="gemini:pay:binance")],
-            [InlineKeyboardButton("📱 QRIS · Rp20.000", callback_data="gemini:pay:qris")],
+            [InlineKeyboardButton(f"💳 Binance · {binance_price} USDT", callback_data="gemini:pay:binance")],
+            [InlineKeyboardButton(f"📱 QRIS · {qris_price}", callback_data="gemini:pay:qris")],
             [InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="product:gemini")],
         ]
     )
@@ -1056,19 +1069,40 @@ async def show_payment_instruction(update: Update, context: ContextTypes.DEFAULT
             )
             return
         network_line = f"\nNetwork: <b>{_safe_html(network)}</b>" if network else ""
+        binance_price = _setting_text("gemini_binance_price_usdt", "0.60")
         text = (
-            f"<b>Direct Binance Transfer</b>\n\nAmount: <b>0.60 USDT</b>\nBinance account:\n<code>{_safe_html(account)}</code>{network_line}\n\nTransfer USDT directly to this admin Binance account, then send the transaction ID/hash."
+            f"<b>Direct Binance Transfer</b>\n\nAmount: <b>{_safe_html(binance_price)} USDT</b>\nBinance account:\n<code>{_safe_html(account)}</code>{network_line}\n\nTransfer USDT directly to this admin Binance account, then send the transaction ID/hash."
             if english
-            else f"<b>Transfer Langsung Binance</b>\n\nJumlah: <b>0.60 USDT</b>\nAkun Binance admin:\n<code>{_safe_html(account)}</code>{network_line}\n\nTransfer USDT langsung ke akun Binance admin ini, lalu kirim TXID/hash transaksi."
+            else f"<b>Transfer Langsung Binance</b>\n\nJumlah: <b>{_safe_html(binance_price)} USDT</b>\nAkun Binance admin:\n<code>{_safe_html(account)}</code>{network_line}\n\nTransfer USDT langsung ke akun Binance admin ini, lalu kirim TXID/hash transaksi."
         )
     else:
         note = os.getenv("QRIS_PAYMENT_NOTE", "Scan QRIS and send the transaction reference or screenshot.").strip()
+        qris_price = _format_idr(_setting("gemini_qris_price_idr", 20000))
         text = (
-            f"<b>QRIS Payment</b>\n\nAmount: <b>Rp20.000</b>\n{_safe_html(note)}\n\nAfter payment, send the transaction reference or screenshot."
+            f"<b>QRIS Payment</b>\n\nAmount: <b>{qris_price}</b>\n{_safe_html(note)}\n\nAfter payment, send the transaction reference or screenshot."
             if english
-            else f"<b>Pembayaran QRIS</b>\n\nJumlah: <b>Rp20.000</b>\n{_safe_html(note)}\n\nSetelah membayar, kirim referensi transaksi atau screenshot."
+            else f"<b>Pembayaran QRIS</b>\n\nJumlah: <b>{qris_price}</b>\n{_safe_html(note)}\n\nSetelah membayar, kirim referensi transaksi atau screenshot."
         )
         qris_url = os.getenv("QRIS_IMAGE_URL", "").strip()
+        qris_path = Path(os.getenv("QRIS_IMAGE_PATH", "QRIS-SUKSES-BERSAMA.jpeg"))
+        if not qris_path.is_absolute():
+            qris_path = BASE_DIR / qris_path
+        if qris_path.exists() and update.effective_chat and context.bot:
+            payment_buttons = [[InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="gemini:payment_methods")]]
+            try:
+                if update.callback_query and update.callback_query.message:
+                    await update.callback_query.message.delete()
+                with qris_path.open("rb") as qris_file:
+                    await context.bot.send_photo(
+                        chat_id=update.effective_chat.id,
+                        photo=qris_file,
+                        caption=text,
+                        parse_mode="HTML",
+                        reply_markup=InlineKeyboardMarkup(payment_buttons),
+                    )
+                return
+            except TelegramError as exc:
+                logger.warning("Could not send local QRIS image: %s", exc)
     payment_buttons = []
     if method == "qris" and qris_url:
         payment_buttons.append([InlineKeyboardButton("📱 Open QRIS", url=qris_url)])
@@ -1113,7 +1147,7 @@ async def _create_payment_request(update: Update, context: ContextTypes.DEFAULT_
     if method not in {"binance", "qris"}:
         await _present_text(update, "Pilih metode pembayaran terlebih dahulu.", reply_markup=_back_keyboard("gemini:payment_methods"))
         return
-    amount = "0.60 USDT" if method == "binance" else "Rp20.000"
+    amount = _setting_text("gemini_binance_price_usdt", "0.60") + " USDT" if method == "binance" else _format_idr(_setting("gemini_qris_price_idr", 20000))
     with _db() as connection:
         cursor = connection.execute(
             "INSERT INTO payment_requests(user_id, method, amount, reference, evidence_file_id, email, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -1396,6 +1430,16 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         )
         return
 
+    if data == "admin:gemini_prices":
+        context.user_data["step"] = "admin_gemini_prices"
+        await _safe_edit_text(
+            update,
+            "Send: `CUSTOMER_IDR QRIS_IDR BINANCE_USDT`\nExample: `15000 20000 0.60`" if _is_english(update) else "Kirim: `HARGA_CUSTOMER HARGA_QRIS HARGA_BINANCE`\nContoh: `15000 20000 0.60`",
+            parse_mode="Markdown",
+            reply_markup=_back_keyboard("admin:menu"),
+        )
+        return
+
     if data == "admin:redeem":
         context.user_data["step"] = "admin_redeem"
         await _safe_edit_text(
@@ -1657,6 +1701,21 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
         context.user_data.pop("step", None)
         await update.message.reply_text(f"Stok Gemini berhasil ditambahkan. Total stok aktif: *{_gemini_stock_count()}*.", parse_mode="Markdown")
+        await show_admin_menu(update, context)
+        return
+
+    if step == "admin_gemini_prices":
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            return
+        match = re.fullmatch(r"(\d+)\s+(\d+)\s+(\d+(?:\.\d{1,2})?)", text)
+        if not match or int(match.group(1)) <= 0 or int(match.group(2)) <= 0 or float(match.group(3)) <= 0:
+            await update.message.reply_text("Format tidak valid. Gunakan: `15000 20000 0.60`", parse_mode="Markdown")
+            return
+        _set_setting("gemini_price_idr", int(match.group(1)))
+        _set_setting("gemini_qris_price_idr", int(match.group(2)))
+        _set_setting("gemini_binance_price_usdt", float(match.group(3)))
+        context.user_data.pop("step", None)
+        await update.message.reply_text("Harga customer Gemini berhasil diperbarui.")
         await show_admin_menu(update, context)
         return
 

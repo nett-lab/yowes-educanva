@@ -293,6 +293,7 @@ PRODSELLER_BASE_URL=https://prodseller.com/v1
 BINANCE_PAYMENT_ADDRESS=your_binance_payment_address
 BINANCE_NETWORK=USDT network name
 QRIS_IMAGE_URL=https://your-qris-image-url
+QRIS_IMAGE_PATH=QRIS-SUKSES-BERSAMA.jpeg
 QRIS_PAYMENT_NOTE=QRIS payment instructions
 ```
 
@@ -367,7 +368,7 @@ When `PRODSELLER_API_KEY` is configured, the Gemini menu uses:
 
 Gemini payment can also be requested through Binance (`0.60 USDT`) or QRIS (`Rp20.000`). The bot stores the payment request and sends it to admins for manual verification. Only an approved request creates the Prodseller order and sends the delivered link/key to the buyer. Rejected transfers notify the buyer that the payment was cancelled. This flow does not claim blockchain confirmation automatically; admins must verify the TXID or QRIS evidence in the official Binance/payment account.
 
-Use the exact Binance deposit address and network supplied by the admin. Never send USDT to an address copied from an untrusted message, and never place a private key in the bot configuration.
+Use the exact Binance deposit address and network supplied by the admin. Never send USDT to an address copied from an untrusted message, and never place a private key in the bot configuration. When `QRIS_IMAGE_PATH` points to `QRIS-SUKSES-BERSAMA.jpeg`, the QRIS image is sent directly inside Telegram; `QRIS_IMAGE_URL` is only a fallback.
 
 If the API key is not configured, the existing local Gemini stock menu remains available and no provider request is made. Never place the Prodseller API key in `.env` committed to GitHub, README files, logs, or Telegram messages.
 
