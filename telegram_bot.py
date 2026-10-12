@@ -136,6 +136,93 @@ _BROADCAST_TYPES: dict[str, tuple[str, str, str]] = {
     "custom": ("✏️", "Pesan Kustom",    "Custom Message"),
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Product Catalog  — new products are added here; no other code needs changing
+# Each entry carries all pricing defaults and env-var names for ProdSeller.
+# ──────────────────────────────────────────────────────────────────────────────
+_PRODUCT_CATALOG: dict[str, dict] = {
+    "capcut": {
+        "emoji": "🎥",
+        "label_id": "CapCut Pro",
+        "label_en": "CapCut Pro",
+        "price_coins_key": "capcut_price",
+        "price_idr_key": "capcut_price_idr",
+        "price_qris_key": "capcut_qris_price_idr",
+        "price_binance_key": "capcut_binance_price_usdt",
+        "default_coins": 50,
+        "default_idr": 30000,
+        "default_qris_idr": 30000,
+        "default_binance_usdt": "1.7",
+        "prodseller_id_env": "PRODSELLER_CAPCUT_ID",
+        "prodseller_name_env": "PRODSELLER_CAPCUT_NAME",
+        "prodseller_default": "CapCut",
+        "stock_key": "capcut_manual_stock",
+        "info_key": "capcut_info",
+        "default_info_id": "• Akun / Lisensi CapCut Pro Aktif\n• Tanpa watermark, ekspor hingga kualitas 4K\n• Akses semua template, font, musik & efek AI\n• Pengiriman cepat & garansi aktif",
+        "default_info_en": "• Active CapCut Pro Account / License\n• Watermark-free, export up to 4K quality\n• Full access to templates, fonts, music & AI tools\n• Fast delivery & active warranty",
+    },
+    "claude": {
+        "emoji": "🤖",
+        "label_id": "Claude API",
+        "label_en": "Claude API",
+        "price_coins_key": "claude_price",
+        "price_idr_key": "claude_price_idr",
+        "price_qris_key": "claude_qris_price_idr",
+        "price_binance_key": "claude_binance_price_usdt",
+        "default_coins": 50,
+        "default_idr": 100000,
+        "default_qris_idr": 100000,
+        "default_binance_usdt": "5.00",
+        "prodseller_id_env": "PRODSELLER_CLAUDE_ID",
+        "prodseller_name_env": "PRODSELLER_CLAUDE_NAME",
+        "prodseller_default": "Claude",
+        "stock_key": "claude_manual_stock",
+        "info_key": "claude_info",
+        "default_info_id": "• Akun / Langganan Claude API\n• Akses model canggih Claude 3.5 Sonnet / Opus\n• Kemampuan penalaran, coding & analisis dokumen tinggi\n• Limit pesan lebih besar & respon cepat",
+        "default_info_en": "• Claude API Account / Subscription\n• Access to advanced Claude 3.5 Sonnet / Opus models\n• High reasoning, coding & document analysis capabilities\n• Higher message limits & fast response times",
+    },
+    "codex": {
+        "emoji": "💻",
+        "label_id": "GPT Codex",
+        "label_en": "GPT Codex",
+        "price_coins_key": "codex_price",
+        "price_idr_key": "codex_price_idr",
+        "price_qris_key": "codex_qris_price_idr",
+        "price_binance_key": "codex_binance_price_usdt",
+        "default_coins": 55,
+        "default_idr": 55000,
+        "default_qris_idr": 55000,
+        "default_binance_usdt": "2.5",
+        "prodseller_id_env": "PRODSELLER_CODEX_ID",
+        "prodseller_name_env": "PRODSELLER_CODEX_NAME",
+        "prodseller_default": "GPT Codex",
+        "stock_key": "codex_manual_stock",
+        "info_key": "codex_info",
+        "default_info_id": "• Akses OpenAI GPT Codex\n• Dioptimalkan untuk coding, debugging & refactoring\n• Dukungan berbagai bahasa pemrograman\n• Pengiriman instan & langsung siap digunakan",
+        "default_info_en": "• OpenAI GPT Codex Access\n• Optimized for coding, debugging & refactoring\n• Broad programming language support\n• Instant delivery & ready to use",
+    },
+    "primevideo": {
+        "emoji": "📺",
+        "label_id": "Prime Video",
+        "label_en": "Prime Video",
+        "price_coins_key": "primevideo_price",
+        "price_idr_key": "primevideo_price_idr",
+        "price_qris_key": "primevideo_qris_price_idr",
+        "price_binance_key": "primevideo_binance_price_usdt",
+        "default_coins": 35,
+        "default_idr": 35000,
+        "default_qris_idr": 35000,
+        "default_binance_usdt": "2.0",
+        "prodseller_id_env": "PRODSELLER_PRIMEVIDEO_ID",
+        "prodseller_name_env": "PRODSELLER_PRIMEVIDEO_NAME",
+        "prodseller_default": "Prime Video",
+        "stock_key": "primevideo_manual_stock",
+        "info_key": "primevideo_info",
+        "default_info_id": "• Langganan Amazon Prime Video Premium\n• Streaming film & series eksklusif Amazon Originals\n• Kualitas video hingga 4K UHD & HDR\n• Support Smartphone, Tablet, PC & Smart TV",
+        "default_info_en": "• Amazon Prime Video Premium Subscription\n• Stream exclusive movies & Amazon Originals\n• Video quality up to 4K UHD & HDR\n• Supports Smartphones, Tablets, PC & Smart TV",
+    },
+}
+
 
 def _db() -> sqlite3.Connection:
     connection = sqlite3.connect(DATABASE_PATH)
@@ -211,18 +298,49 @@ def init_database() -> None:
             [
                 ("doc_price", "3"),
                 ("gemini_price", "20"),
-                ("gemini_price_idr", "15000"),
+                ("gemini_price_idr", "20000"),
                 ("gemini_qris_price_idr", "20000"),
                 ("gemini_binance_price_usdt", "0.60"),
                 ("checkin_reward", "1"),
                 ("referral_reward", "2"),
                 ("gemini_manual_stock", "0"),
                 ("gemini_info", ""),
+                # CapCut
+                ("capcut_price", "35"),
+                ("capcut_price_idr", "35000"),
+                ("capcut_qris_price_idr", "35000"),
+                ("capcut_binance_price_usdt", "2.0"),
+                ("capcut_manual_stock", "0"),
+                ("capcut_info", ""),
+                # Claude AI
+                ("claude_price", "100"),
+                ("claude_price_idr", "100000"),
+                ("claude_qris_price_idr", "100000"),
+                ("claude_binance_price_usdt", "5"),
+                ("claude_manual_stock", "0"),
+                ("claude_info", ""),
+                # GPT Codex
+                ("codex_price", "50"),
+                ("codex_price_idr", "55000"),
+                ("codex_qris_price_idr", "55000"),
+                ("codex_binance_price_usdt", "2.5"),
+                ("codex_manual_stock", "0"),
+                ("codex_info", ""),
+                # Prime Video
+                ("primevideo_price", "35"),
+                ("primevideo_price_idr", "35000"),
+                ("primevideo_qris_price_idr", "35000"),
+                ("primevideo_binance_price_usdt", "2.0"),
+                ("primevideo_manual_stock", "0"),
+                ("primevideo_info", ""),
             ],
         )
         for column, definition in (
             ("user_chat_id", "INTEGER"),
             ("user_message_id", "INTEGER"),
+            # product_key tracks which catalog product the payment is for.
+            # DEFAULT 'gemini' ensures backward-compat with existing rows.
+            ("product_key", "TEXT NOT NULL DEFAULT 'gemini'"),
         ):
             try:
                 connection.execute(f"ALTER TABLE payment_requests ADD COLUMN {column} {definition}")
@@ -392,7 +510,7 @@ async def _create_gemini_order(
     user_id: int,
     product: dict,
     email: str | None = None,
-    charge_coins: bool = True,
+    charge_coins: bool = False,
 ) -> dict:
     price = _setting("gemini_price", 20)
     provider_balance = await asyncio.to_thread(_prodseller_request_sync, "GET", "/balance")
@@ -423,6 +541,277 @@ async def _create_gemini_order(
         raise
     return order
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Generic Catalog Functions  (CapCut / Claude AI / GPT Codex / Prime Video)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _find_catalog_product(key: str) -> dict:
+    """Locate a ProdSeller product for any catalog entry by ID or name."""
+    cfg = _PRODUCT_CATALOG[key]
+    product_id   = os.getenv(cfg["prodseller_id_env"], "").strip()
+    product_name = os.getenv(cfg["prodseller_name_env"], cfg["prodseller_default"]).strip().lower()
+    products = await _prodseller_products()
+    if product_id:
+        for p in products:
+            if str(p.get("id")) == product_id:
+                return p
+    matches = [p for p in products if product_name and product_name in str(p.get("name", "")).lower()]
+    if not matches:
+        raise ProdSellerError(f"{cfg['prodseller_default']} product was not found on ProdSeller")
+    return matches[0]
+
+
+async def _create_catalog_order(
+    user_id: int,
+    key: str,
+    product: dict,
+    email: str | None = None,
+    charge_coins: bool = False,
+) -> dict:
+    """Create a ProdSeller order for a catalog product, optionally deducting coins."""
+    cfg = _PRODUCT_CATALOG[key]
+    price = _setting(cfg["price_coins_key"], cfg["default_coins"])
+    provider_balance = await asyncio.to_thread(_prodseller_request_sync, "GET", "/balance")
+    try:
+        provider_price    = float(product.get("price", 0))
+        available_balance = float(provider_balance.get("balance", 0))
+    except (TypeError, ValueError) as exc:
+        raise ProdSellerError("ProdSeller returned an invalid balance") from exc
+    if available_balance < provider_price:
+        raise ProdSellerFundingError("ProdSeller balance is insufficient")
+    label = cfg["label_en"]
+    if charge_coins and not _spend_coins(user_id, price, f"{label} purchase"):
+        raise ProdSellerError(f"Insufficient coin balance; requires {price} coins")
+    idempotency_key = f"{key}-{user_id}-{secrets.token_hex(12)}"
+    body: dict = {"productId": product["id"], "quantity": 1}
+    if email:
+        body["email"] = email
+    try:
+        order = await asyncio.to_thread(
+            _prodseller_request_sync,
+            "POST",
+            "/orders",
+            json=body,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+    except ProdSellerError:
+        if charge_coins:
+            _add_coins(user_id, price, f"{label} purchase refund")
+        raise
+    return order
+
+
+def _prodseller_configured() -> bool:
+    """Return True when a real ProdSeller API key is present."""
+    k = os.getenv("PRODSELLER_API_KEY", "").strip()
+    return bool(k) and not k.startswith("psk_your_")
+
+
+async def _show_catalog_product(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str) -> None:
+    """Render the product-detail page for any catalog product."""
+    cfg     = _PRODUCT_CATALOG[key]
+    english = _is_english(update)
+    label   = cfg["label_en"] if english else cfg["label_id"]
+    emoji   = cfg["emoji"]
+    price_idr = _setting(cfg["price_idr_key"], cfg["default_idr"])
+    price_usdt = _setting_text(cfg["price_binance_key"], cfg["default_binance_usdt"])
+    price_display = f"{price_usdt} USDT" if english else _format_idr(price_idr)
+    context.user_data["buying_product"] = key
+
+    admin_info    = _setting_text(cfg["info_key"], "").strip()
+    fallback_info = cfg.get("default_info_en" if english else "default_info_id", "")
+
+    if not _prodseller_configured():
+        stock        = _setting(cfg["stock_key"], 0)
+        stock_text   = str(stock) if stock > 0 else ("Ready" if english else "Tersedia")
+        info_to_show = admin_info or fallback_info
+        info_block   = f"\n\n{_safe_html(info_to_show)}" if info_to_show else ""
+        text = (
+            f"<b>{emoji} {_safe_html(label)}</b>\n\n"
+            + (f"Price: <b>{price_display}</b>\nStock: <b>{_safe_html(stock_text)}</b>"
+               if english else
+               f"Harga: <b>{price_display}</b>\nStok: <b>{_safe_html(stock_text)}</b>")
+            + info_block
+        )
+    else:
+        try:
+            pp = await _find_catalog_product(key)
+        except ProdSellerError as exc:
+            logger.info("Catalog product %s unavailable: %s", key, exc)
+            await _safe_edit_text(
+                update,
+                f"<b>{emoji} {_safe_html(label)}</b>\n\n"
+                + ("Product is temporarily unavailable. Please contact admin."
+                   if english else
+                   "Produk sedang tidak tersedia. Silakan hubungi admin."),
+                parse_mode="HTML", reply_markup=_back_keyboard(),
+            )
+            return
+        p_stock      = pp.get("stock")
+        stock_text   = str(p_stock) if p_stock is not None else ("Available" if pp.get("inStock") else "Out of stock")
+        live_desc    = pp.get("description", "").strip()
+        info_to_show = admin_info or live_desc or fallback_info
+        info_block   = f"\n\n{_safe_html(info_to_show)}" if info_to_show else ""
+        p_name       = pp.get("name", label)
+        text = (
+            f"<b>{emoji} {_safe_html(p_name)}</b>\n\n"
+            + (f"Price: <b>{price_display}</b>\nStock: <b>{_safe_html(stock_text)}</b>"
+               if english else
+               f"Harga: <b>{price_display}</b>\nStok: <b>{_safe_html(stock_text)}</b>")
+            + info_block
+        )
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🛒 Buy {label}" if english else f"🛒 Beli {label}", callback_data=f"catalog_buy:{key}")],
+        [InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="menu:main")],
+    ])
+    await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=keyboard)
+
+
+async def _show_catalog_payment_methods(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str) -> None:
+    """Payment method selection screen for a catalog product (QRIS & Binance only; coins reserved for Canva)."""
+    cfg     = _PRODUCT_CATALOG[key]
+    english = _is_english(update)
+    label   = cfg["label_en"] if english else cfg["label_id"]
+    binance_price = _setting_text(cfg["price_binance_key"], cfg["default_binance_usdt"])
+    qris_price    = _format_idr(_setting(cfg["price_qris_key"], cfg["default_qris_idr"]))
+
+    text = (
+        f"<b>💳 {'Purchase' if english else 'Beli'} {_safe_html(label)}</b>\n\n"
+        + ("Choose payment method (Binance USDT or QRIS). Your order is verified by admin before delivery."
+           if english else
+           "Pilih metode pembayaran (Binance USDT atau QRIS). Pesanan Anda diverifikasi oleh admin sebelum dikirim.")
+    )
+    rows = [
+        [InlineKeyboardButton(f"💳 Binance · {binance_price} USDT", callback_data=f"catalog_pay:{key}:binance")],
+        [InlineKeyboardButton(f"📱 QRIS · {qris_price}",            callback_data=f"catalog_pay:{key}:qris")],
+        [InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data=f"product:{key}")],
+    ]
+    await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def _show_catalog_payment_instruction(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, method: str,
+) -> None:
+    """Show Binance or QRIS payment instructions for a catalog product."""
+    cfg     = _PRODUCT_CATALOG[key]
+    english = _is_english(update)
+    context.user_data["payment_method"] = method
+    context.user_data["buying_product"] = key
+    context.user_data["step"]           = f"catalog_payment:{key}:{method}"
+    back_btn = [[InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data=f"catalog_payment_methods:{key}")]]
+
+    if method == "binance":
+        account = os.getenv("BINANCE_ACCOUNT_ID", "").strip() or os.getenv("BINANCE_PAYMENT_ADDRESS", "").strip()
+        if not account or account.startswith("your_"):
+            await _safe_edit_text(
+                update,
+                "Binance payment is not configured. Please contact admin." if english
+                else "Pembayaran Binance belum dikonfigurasi. Silakan hubungi admin.",
+                reply_markup=InlineKeyboardMarkup(back_btn),
+            )
+            return
+        binance_price = _setting_text(cfg["price_binance_key"], cfg["default_binance_usdt"])
+        network  = os.getenv("BINANCE_NETWORK", "").strip()
+        net_line = f"\nNetwork: <b>{_safe_html(network)}</b>" if network else ""
+        text = (
+            f"<b>💳 Direct Binance Transfer</b>\n\nAmount: <b>{_safe_html(binance_price)} USDT</b>\n"
+            f"Binance account:\n<code>{_safe_html(account)}</code>{net_line}\n\n"
+            + ("Transfer USDT, then send the transaction ID/hash." if english
+               else "Transfer USDT ke akun ini, lalu kirim TXID/hash transaksi.")
+        )
+        await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back_btn))
+    else:
+        qris_price = _format_idr(_setting(cfg["price_qris_key"], cfg["default_qris_idr"]))
+        note       = os.getenv("QRIS_PAYMENT_NOTE", "").strip()
+        text = (
+            f"<b>📱 QRIS Payment</b>\n\nAmount: <b>{qris_price}</b>\n"
+            + (f"{_safe_html(note)}\n\n" if note else "")
+            + ("After payment, send the transaction reference or screenshot." if english
+               else "Setelah membayar, kirim referensi transaksi atau screenshot.")
+        )
+        qris_path = Path(os.getenv("QRIS_IMAGE_PATH", "QRIS-SUKSES-BERSAMA.jpeg"))
+        if not qris_path.is_absolute():
+            qris_path = BASE_DIR / qris_path
+        if qris_path.exists() and update.effective_chat:
+            try:
+                if update.callback_query and update.callback_query.message:
+                    await update.callback_query.message.delete()
+                with qris_path.open("rb") as qf:
+                    await context.bot.send_photo(
+                        chat_id=update.effective_chat.id, photo=qf,
+                        caption=text, parse_mode="HTML",
+                        reply_markup=InlineKeyboardMarkup(back_btn),
+                    )
+                return
+            except TelegramError as exc:
+                logger.warning("Could not send QRIS image for %s: %s", key, exc)
+        await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back_btn))
+
+
+async def _complete_catalog_coin_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str) -> None:
+    """Coins are strictly reserved for Canva document generation."""
+    cfg   = _PRODUCT_CATALOG.get(key, {})
+    label = cfg.get("label_en" if _is_english(update) else "label_id", "Produk digital")
+    msg = (
+        f"Coins can only be used for Canva document generation. Please purchase {label} via QRIS or Binance USDT."
+        if _is_english(update) else
+        f"Koin hanya dapat digunakan untuk pembuatan dokumen Canva. Silakan beli {label} melalui QRIS atau Binance USDT."
+    )
+    await _present_text(update, msg, reply_markup=_back_keyboard(f"catalog_payment_methods:{key}"))
+
+
+async def _create_catalog_payment_request(
+    update: Update, context: ContextTypes.DEFAULT_TYPE,
+    key: str, reference: str, evidence_file_id: str | None = None,
+) -> None:
+    """Persist a payment_requests row for a catalog product and notify admins."""
+    user = _user_from_update(update)
+    if not user:
+        return
+    cfg     = _PRODUCT_CATALOG[key]
+    english = _is_english(update)
+    label   = cfg["label_en"] if english else cfg["label_id"]
+    method  = context.user_data.get("payment_method")
+    if method not in {"binance", "qris"}:
+        await _present_text(update, "Choose a payment method first." if english
+                            else "Pilih metode pembayaran terlebih dahulu.",
+                            reply_markup=_back_keyboard(f"catalog_payment_methods:{key}"))
+        return
+    amount = (_setting_text(cfg["price_binance_key"], cfg["default_binance_usdt"]) + " USDT"
+              if method == "binance" else
+              _format_idr(_setting(cfg["price_qris_key"], cfg["default_qris_idr"])))
+    email = context.user_data.get("product_email") or context.user_data.get("gemini_email")
+    with _db() as connection:
+        cursor = connection.execute(
+            "INSERT INTO payment_requests"
+            "(user_id, method, amount, reference, evidence_file_id, email, product_key, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (user["user_id"], method, amount, reference[:500],
+             evidence_file_id, email,
+             key, datetime.now().isoformat()),
+        )
+        payment_id = cursor.lastrowid
+    await _notify_payment_admins(context, payment_id)
+    context.user_data.pop("step", None)
+    msg = (
+        f"<b>Payment submitted</b>\n\nRequest: <code>#{payment_id}</code>\nProduct: <b>{_safe_html(label)}</b>\n"
+        "Your payment is waiting for admin verification."
+        if english else
+        f"<b>Pembayaran terkirim</b>\n\nRequest: <code>#{payment_id}</code>\nProduk: <b>{_safe_html(label)}</b>\n"
+        "Pembayaran sedang menunggu verifikasi admin."
+    )
+    sent = await _present_text(update, msg, parse_mode="HTML", reply_markup=_back_keyboard("menu:main"))
+    if sent and getattr(sent, "chat_id", None) and getattr(sent, "message_id", None):
+        with _db() as connection:
+            connection.execute(
+                "UPDATE payment_requests SET user_chat_id = ?, user_message_id = ? WHERE id = ?",
+                (sent.chat_id, sent.message_id, payment_id),
+            )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 async def _broadcast_announcement(
     context: ContextTypes.DEFAULT_TYPE,
@@ -583,6 +972,27 @@ async def _safe_edit_text(update: Update, text: str, **kwargs):
     and sends a fresh text message so the user always gets a response.
     """
     if update.callback_query is not None:
+        msg = update.callback_query.message
+        bot = getattr(update.callback_query, "_bot", None)
+        if bot is None and hasattr(update.callback_query, "get_bot"):
+            try:
+                bot = update.callback_query.get_bot()
+            except Exception:
+                pass
+
+        # If current message is a photo/media message (e.g. QRIS image), delete and send fresh text
+        if msg is not None and getattr(msg, "photo", None):
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            if update.effective_chat and bot:
+                return await bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=text,
+                    **kwargs,
+                )
+
         try:
             return await update.callback_query.edit_message_text(text, **kwargs)
         except TelegramError as exc:
@@ -590,21 +1000,19 @@ async def _safe_edit_text(update: Update, text: str, **kwargs):
             if "message is not modified" in err_lower:
                 # Content unchanged — not an error worth acting on.
                 return None
-            if "there is no text in the message" in err_lower or "no text in the message" in err_lower:
-                # The current message is a photo/media (e.g. QRIS image).
-                # Delete it and send a new text message instead.
+            if "there is no text" in err_lower or "no text in the message" in err_lower or "message can't be edited" in err_lower:
                 try:
-                    await update.callback_query.message.delete()
-                except TelegramError:
+                    if msg:
+                        await msg.delete()
+                except Exception:
                     pass
-                if update.effective_chat:
-                    return await update.callback_query.get_bot().send_message(
+                if update.effective_chat and bot:
+                    return await bot.send_message(
                         chat_id=update.effective_chat.id,
                         text=text,
                         **kwargs,
                     )
-            else:
-                logger.warning("_safe_edit_text failed: %s", exc)
+            logger.warning("_safe_edit_text failed: %s", exc)
             return None
     if update.message is not None:
         return await update.message.reply_text(text, **kwargs)
@@ -813,16 +1221,39 @@ def _main_menu_text(update: Update) -> str:
 def _main_menu_keyboard(update: Update) -> InlineKeyboardMarkup:
     english = _language(update) == "en"
     doc_price = _setting("doc_price", 3)
-    gemini_price = _setting("gemini_price", 20)
+    if english:
+        gemini_price = f"{_setting_text('gemini_binance_price_usdt', '0.60')} USDT"
+        capcut_price = f"{_setting_text('capcut_binance_price_usdt', '1.7')} USDT"
+        claude_price = f"{_setting_text('claude_binance_price_usdt', '5.0')} USDT"
+        codex_price  = f"{_setting_text('codex_binance_price_usdt', '2.5')} USDT"
+        prime_price  = f"{_setting_text('primevideo_binance_price_usdt', '2.0')} USDT"
+    else:
+        gemini_price = _format_idr(_setting("gemini_price_idr", 20000))
+        capcut_price = _format_idr(_setting("capcut_price_idr", 30000))
+        claude_price = _format_idr(_setting("claude_price_idr", 100000))
+        codex_price  = _format_idr(_setting("codex_price_idr", 55000))
+        prime_price  = _format_idr(_setting("primevideo_price_idr", 35000))
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(f"🎓 Canva Doc Education · {doc_price} 🪙", callback_data="product:docs")],
-            [InlineKeyboardButton(f"✨ Gemini Pro 18 Bulan · {gemini_price} 🪙" if not english else f"✨ Gemini Pro 18 Months · {gemini_price} 🪙", callback_data="product:gemini")],
-            [InlineKeyboardButton("🪙 Coin Saya" if not english else "🪙 My Coins", callback_data="account:coins")],
-            [InlineKeyboardButton("🤝 Referral" if not english else "🤝 Referral", callback_data="referral:menu")],
-            [InlineKeyboardButton("🎁 Check-in Harian" if not english else "🎁 Daily Check-in", callback_data="checkin:daily")],
+            [InlineKeyboardButton(
+                f"✨ Gemini Pro 18 Bulan · {gemini_price}" if not english
+                else f"✨ Gemini Pro 18 Months · {gemini_price}",
+                callback_data="product:gemini",
+            )],
+            [InlineKeyboardButton(f"🎥 CapCut Pro · {capcut_price}", callback_data="product:capcut")],
+            [InlineKeyboardButton(f"🤖 Claude API · {claude_price}", callback_data="product:claude")],
+            [InlineKeyboardButton(f"💻 GPT Codex · {codex_price}", callback_data="product:codex")],
+            [InlineKeyboardButton(f"📺 Prime Video · {prime_price}", callback_data="product:primevideo")],
+            [
+                InlineKeyboardButton("🪙 Coin Saya" if not english else "🪙 My Coins", callback_data="account:coins"),
+                InlineKeyboardButton("🤝 Referral", callback_data="referral:menu"),
+            ],
+            [
+                InlineKeyboardButton("🎁 Check-in Harian" if not english else "🎁 Daily Check-in", callback_data="checkin:daily"),
+                InlineKeyboardButton("🎟️ Redeem Code", callback_data="redeem:input"),
+            ],
             [InlineKeyboardButton("🌐 Bahasa / Language", callback_data="settings:language")],
-            [InlineKeyboardButton("🎟️ Redeem Code", callback_data="redeem:input")],
             *([[InlineKeyboardButton("⚙️ Admin Settings", callback_data="admin:menu")]] if _is_admin(update.effective_user.id if update.effective_user else None) else []),
         ]
     )
@@ -964,9 +1395,12 @@ async def show_coins(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     english = user["language"] == "en"
     text = (
         f"*My Coins*\n\nBalance: *{user['coins']} 🪙*\n\n"
+        "💡 _Coins are exclusively used for creating Canva Education documents._\n"
         "Earn coins from daily check-ins, referrals, and redeem codes."
         if english
-        else f"*Coin Saya*\n\nSaldo: *{user['coins']} 🪙*\n\nDapatkan coin melalui check-in harian, referral, dan redeem code."
+        else f"*Coin Saya*\n\nSaldo: *{user['coins']} 🪙*\n\n"
+        "💡 _Koin khusus digunakan untuk pembuatan dokumen Canva Education._\n"
+        "Dapatkan coin melalui check-in harian, referral, dan redeem code."
     )
     keyboard = InlineKeyboardMarkup(
         [
@@ -1060,49 +1494,187 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not _is_admin(update.effective_user.id if update.effective_user else None):
         await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard())
         return
-    gemini_stock_count = _setting("gemini_manual_stock", 0)
-    gemini_info_preview = _setting_text("gemini_info", "")
-    info_preview = (gemini_info_preview[:40] + "…") if len(gemini_info_preview) > 40 else (gemini_info_preview or "-")
+    doc_p = _setting("doc_price", 3)
+    checkin_r = _setting("checkin_reward", 1)
+    ref_r = _setting("referral_reward", 2)
+    gemini_p = _format_idr(_setting("gemini_price_idr", 20000))
+    gemini_u = _setting_text("gemini_binance_price_usdt", "0.60")
+    capcut_p = _format_idr(_setting("capcut_price_idr", 30000))
+    capcut_u = _setting_text("capcut_binance_price_usdt", "1.7")
+    claude_p = _format_idr(_setting("claude_price_idr", 100000))
+    claude_u = _setting_text("claude_binance_price_usdt", "5.0")
+    codex_p  = _format_idr(_setting("codex_price_idr", 55000))
+    codex_u  = _setting_text("codex_binance_price_usdt", "2.5")
+    prime_p  = _format_idr(_setting("primevideo_price_idr", 35000))
+    prime_u  = _setting_text("primevideo_binance_price_usdt", "2.0")
+
     if _is_english(update):
         text = (
-            f"*Admin Settings*\n\n"
-            f"Canva Doc price: {_setting('doc_price', 3)} 🪙\n"
-            f"Gemini Pro price: {_setting('gemini_price', 20)} 🪙\n"
-            f"Customer price: {_format_idr(_setting('gemini_price_idr', 15000))}\n"
-            f"QRIS price: {_format_idr(_setting('gemini_qris_price_idr', 20000))}\n"
-            f"Binance price: {_setting_text('gemini_binance_price_usdt', '0.60')} USDT\n"
-            f"Check-in reward: {_setting('checkin_reward', 1)} 🪙\n"
-            f"Referral reward: {_setting('referral_reward', 2)} 🪙\n\n"
-            f"📦 Gemini Stock: *{gemini_stock_count}* units\n"
-            f"ℹ️ Gemini Info: _{info_preview}_"
+            f"*Admin Dashboard*\n\n"
+            f"🎓 *Canva Education:*\n"
+            f"• Doc Price: *{doc_p} 🪙*\n"
+            f"• Daily Check-in: *{checkin_r} 🪙*\n"
+            f"• Referral Reward: *{ref_r} 🪙*\n\n"
+            f"🛍️ *Digital Products (USDT / IDR):*\n"
+            f"• ✨ Gemini Pro: *{gemini_u} USDT* ({gemini_p})\n"
+            f"• 🎥 CapCut Pro: *{capcut_u} USDT* ({capcut_p})\n"
+            f"• 🤖 Claude API: *{claude_u} USDT* ({claude_p})\n"
+            f"• 💻 GPT Codex: *{codex_u} USDT* ({codex_p})\n"
+            f"• 📺 Prime Video: *{prime_u} USDT* ({prime_p})"
         )
     else:
         text = (
-            f"*Admin Settings*\n\n"
-            f"Harga Canva Doc: {_setting('doc_price', 3)} 🪙\n"
-            f"Harga Gemini Pro: {_setting('gemini_price', 20)} 🪙\n"
-            f"Harga pelanggan: {_format_idr(_setting('gemini_price_idr', 20000))}\n"
-            f"Harga QRIS: {_format_idr(_setting('gemini_qris_price_idr', 20000))}\n"
-            f"Harga Binance: {_setting_text('gemini_binance_price_usdt', '0.60')} USDT\n"
-            f"Reward check-in: {_setting('checkin_reward', 1)} 🪙\n"
-            f"Reward referral: {_setting('referral_reward', 2)} 🪙\n\n"
-            f"📦 Stok Gemini: *{gemini_stock_count}* unit\n"
-            f"ℹ️ Info Gemini: _{info_preview}_"
+            f"*Admin Dashboard*\n\n"
+            f"🎓 *Canva Education:*\n"
+            f"• Harga Dokumen: *{doc_p} 🪙*\n"
+            f"• Reward Check-in: *{checkin_r} 🪙*\n"
+            f"• Reward Referral: *{ref_r} 🪙*\n\n"
+            f"🛍️ *Harga Produk Digital (Rupiah / USDT):*\n"
+            f"• ✨ Gemini Pro: *{gemini_p}* ({gemini_u} USDT)\n"
+            f"• 🎥 CapCut Pro: *{capcut_p}* ({capcut_u} USDT)\n"
+            f"• 🤖 Claude API: *{claude_p}* ({claude_u} USDT)\n"
+            f"• 💻 GPT Codex: *{codex_p}* ({codex_u} USDT)\n"
+            f"• 📺 Prime Video: *{prime_p}* ({prime_u} USDT)"
         )
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("💰 Set Prices" if _is_english(update) else "💰 Atur Harga", callback_data="admin:prices")],
-            [InlineKeyboardButton("🏷️ Gemini Customer Prices" if _is_english(update) else "🏷️ Harga Customer Gemini", callback_data="admin:gemini_prices")],
+            [InlineKeyboardButton("💰 Set Canva & Rewards" if _is_english(update) else "💰 Atur Canva & Reward Koin", callback_data="admin:prices")],
+            [InlineKeyboardButton("🏷️ Set Product Prices" if _is_english(update) else "🏷️ Atur Harga Produk Digital", callback_data="admin:product_prices")],
+            [InlineKeyboardButton("📜 Transaction History" if _is_english(update) else "📜 Histori Transaksi", callback_data="admin:tx_history")],
             [InlineKeyboardButton("🎟️ Create Redeem Code" if _is_english(update) else "🎟️ Buat Redeem Code", callback_data="admin:redeem")],
             [InlineKeyboardButton("➕ Grant User Coins" if _is_english(update) else "➕ Tambah Coin User", callback_data="admin:addcoins")],
-            [InlineKeyboardButton("📦 Set Gemini Stock" if _is_english(update) else "📦 Set Stok Gemini", callback_data="admin:stock")],
-            [InlineKeyboardButton("ℹ️ Set Gemini Info" if _is_english(update) else "ℹ️ Set Info Gemini", callback_data="admin:info")],
+            [InlineKeyboardButton("📦 Set Product Stock" if _is_english(update) else "📦 Atur Stok Produk", callback_data="admin:stock")],
+            [InlineKeyboardButton("ℹ️ Set Product Info" if _is_english(update) else "ℹ️ Atur Info Produk", callback_data="admin:info")],
             [InlineKeyboardButton("📢 Broadcast" if _is_english(update) else "📢 Kirim Pengumuman", callback_data="admin:broadcast")],
             [InlineKeyboardButton("💳 Provider Balance" if _is_english(update) else "💳 Saldo Provider", callback_data="admin:provider_balance")],
             [InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="menu:main")],
         ]
     )
     await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=keyboard)
+
+
+async def show_admin_transaction_history(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, tab: str = "payments", page: int = 0
+) -> None:
+    if not _is_admin(update.effective_user.id if update.effective_user else None):
+        await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard())
+        return
+    english = _is_english(update)
+    limit = 6
+    page = max(0, page)
+
+    with _db() as connection:
+        if tab == "coins":
+            total_count = connection.execute("SELECT COUNT(*) as c FROM coin_transactions").fetchone()["c"]
+            total_pages = max(1, (total_count + limit - 1) // limit)
+            page = min(page, total_pages - 1)
+            offset = page * limit
+            rows = connection.execute(
+                """
+                SELECT c.*, u.username
+                FROM coin_transactions c
+                LEFT JOIN users u ON c.user_id = u.user_id
+                ORDER BY c.id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+
+            header = (
+                f"<b>📜 Coin Transaction History</b>\n"
+                f"Total: <b>{total_count}</b> transactions · Page <b>{page + 1}/{total_pages}</b>\n\n"
+                if english else
+                f"<b>📜 Histori Transaksi Koin</b>\n"
+                f"Total: <b>{total_count}</b> transaksi · Halaman <b>{page + 1}/{total_pages}</b>\n\n"
+            )
+            if not rows:
+                content = "<i>No coin transactions recorded yet.</i>" if english else "<i>Belum ada transaksi koin yang tercatat.</i>"
+            else:
+                lines = []
+                for r in rows:
+                    sign = "+" if r["amount"] > 0 else ""
+                    dt = str(r["created_at"]).replace("T", " ")[:16]
+                    uname = f"@{r['username']}" if r["username"] else f"ID: {r['user_id']}"
+                    lines.append(
+                        f"• <b>#{r['id']}</b> · <code>{_safe_html(uname)}</code>\n"
+                        f"  <b>{sign}{r['amount']} 🪙</b> (Saldo: {r['balance_after']} 🪙)\n"
+                        f"  <i>{_safe_html(r['reason'])}</i> · <code>{dt}</code>"
+                    )
+                content = "\n\n".join(lines)
+            text = header + content
+
+        else:
+            tab = "payments"
+            total_count = connection.execute("SELECT COUNT(*) as c FROM payment_requests").fetchone()["c"]
+            approved_count = connection.execute("SELECT COUNT(*) as c FROM payment_requests WHERE status = 'approved'").fetchone()["c"]
+            pending_count = connection.execute("SELECT COUNT(*) as c FROM payment_requests WHERE status = 'pending'").fetchone()["c"]
+            rejected_count = connection.execute("SELECT COUNT(*) as c FROM payment_requests WHERE status = 'rejected'").fetchone()["c"]
+            total_pages = max(1, (total_count + limit - 1) // limit)
+            page = min(page, total_pages - 1)
+            offset = page * limit
+            rows = connection.execute(
+                """
+                SELECT p.*, u.username
+                FROM payment_requests p
+                LEFT JOIN users u ON p.user_id = u.user_id
+                ORDER BY p.id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+
+            header = (
+                f"<b>📜 Payment Requests History</b>\n"
+                f"Total: <b>{total_count}</b> (✅ {approved_count} · ⏳ {pending_count} · ❌ {rejected_count})\n"
+                f"Page <b>{page + 1}/{total_pages}</b>\n\n"
+                if english else
+                f"<b>📜 Histori Pembayaran Produk</b>\n"
+                f"Total: <b>{total_count}</b> (✅ {approved_count} · ⏳ {pending_count} · ❌ {rejected_count})\n"
+                f"Halaman <b>{page + 1}/{total_pages}</b>\n\n"
+            )
+            if not rows:
+                content = "<i>No payment requests recorded yet.</i>" if english else "<i>Belum ada permintaan pembayaran.</i>"
+            else:
+                lines = []
+                for r in rows:
+                    st = r["status"]
+                    st_icon = "✅" if st == "approved" else ("⏳" if st == "pending" else ("❌" if st == "rejected" else "⚠️"))
+                    dt = str(r["created_at"]).replace("T", " ")[:16]
+                    uname = f"@{r['username']}" if r["username"] else f"ID: {r['user_id']}"
+                    pkey = r["product_key"] if "product_key" in r.keys() and r["product_key"] else "gemini"
+                    if pkey in _PRODUCT_CATALOG:
+                        cfg = _PRODUCT_CATALOG[pkey]
+                        prod_label = f"{cfg['emoji']} {cfg['label_en' if english else 'label_id']}"
+                    else:
+                        prod_label = "✨ Gemini Pro"
+                    method_str = str(r["method"]).upper()
+                    prov_order = f"\n  Order: <code>{_safe_html(r['provider_order_id'])}</code>" if r["provider_order_id"] else ""
+                    lines.append(
+                        f"• <b>#{r['id']}</b> · {prod_label} ({st_icon} <b>{st.capitalize()}</b>)\n"
+                        f"  User: <code>{_safe_html(uname)}</code> · {method_str} <b>{_safe_html(r['amount'])}</b>\n"
+                        f"  Waktu: <code>{dt}</code>{prov_order}"
+                    )
+                content = "\n\n".join(lines)
+            text = header + content
+
+    btn_payments = ("💳 Payments •" if tab == "payments" else "💳 Payments") if english else ("💳 Pembayaran •" if tab == "payments" else "💳 Pembayaran")
+    btn_coins = ("🪙 Coins •" if tab == "coins" else "🪙 Coins") if english else ("🪙 Koin •" if tab == "coins" else "🪙 Koin")
+    tab_row = [
+        InlineKeyboardButton(btn_payments, callback_data="admin:tx:payments:0"),
+        InlineKeyboardButton(btn_coins, callback_data="admin:tx:coins:0"),
+    ]
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"admin:tx:{tab}:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(f"🔄 {page + 1}/{total_pages}", callback_data=f"admin:tx:{tab}:{page}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"admin:tx:{tab}:{page + 1}"))
+
+    back_row = [InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="admin:menu")]
+
+    keyboard = InlineKeyboardMarkup([tab_row, nav_row, back_row])
+    await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def show_provider_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1126,9 +1698,13 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
         context.user_data["product"] = "docs"
         await start_wizard(update, context, edit=True)
         return
-    price = _setting("gemini_price", 20)
-    customer_price_idr = _setting("gemini_price_idr", 15000)
+    if product in _PRODUCT_CATALOG:
+        await _show_catalog_product(update, context, product)
+        return
+    customer_price_idr = _setting("gemini_price_idr", 20000)
+    customer_price_usdt = _setting_text("gemini_binance_price_usdt", "0.60")
     english = _language(update) == "en"
+    price_display = f"{customer_price_usdt} USDT" if english else _format_idr(customer_price_idr)
     gemini_info = _setting_text("gemini_info", "")
     # Build the info block shown in the purchase chat
     info_block = f"\n\n{_safe_html(gemini_info)}" if gemini_info.strip() else ""
@@ -1138,16 +1714,14 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
         if english:
             text = (
                 f"<b>Gemini Pro 18 Months (link)</b>\n\n"
-                f"Customer price: <b>{_format_idr(customer_price_idr)}</b>\n"
-                f"Coin price: <b>{price} coins</b>\n"
+                f"Price: <b>{price_display}</b>\n"
                 f"Stock: <b>{_safe_html(stock_label)}</b>"
                 f"{info_block}"
             )
         else:
             text = (
                 f"<b>Gemini Pro 18 Bulan (link)</b>\n\n"
-                f"Harga pelanggan: <b>{_format_idr(customer_price_idr)}</b>\n"
-                f"Harga coin: <b>{price} coin</b>\n"
+                f"Harga: <b>{price_display}</b>\n"
                 f"Stok: <b>{_safe_html(stock_label)}</b>"
                 f"{info_block}"
             )
@@ -1173,8 +1747,7 @@ async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, produ
     stock_text = str(provider_stock) if provider_stock is not None else ("Available" if provider_product.get("inStock") else "Out of stock")
     text = (
         f"<b>{_safe_html(provider_product.get('name', 'Gemini Pro'))}</b>\n\n"
-        f"{'Customer price' if english else 'Harga pelanggan'}: <b>{_format_idr(customer_price_idr)}</b>\n"
-        f"{'Coin price' if english else 'Harga coin'}: <b>{price} coins</b>\n"
+        f"{'Price' if english else 'Harga'}: <b>{price_display}</b>\n"
         f"{'Stock' if english else 'Stok'}: <b>{_safe_html(stock_text)}</b>"
         f"{info_block}"
     )
@@ -1271,17 +1844,28 @@ async def _notify_payment_admins(context: ContextTypes.DEFAULT_TYPE, payment_id:
         ).fetchone()
     if not payment:
         return
+    # Resolve a human-readable product label for the admin notification
+    pkey = payment["product_key"] if "product_key" in payment.keys() else "gemini"
+    if pkey in _PRODUCT_CATALOG:
+        cfg = _PRODUCT_CATALOG[pkey]
+        product_label = f"{cfg['emoji']} {cfg['label_en']}"
+    else:
+        product_label = "✨ Gemini Pro"
     admin_keyboard = InlineKeyboardMarkup(
         [[
             InlineKeyboardButton("✅ Verify", callback_data=f"payment:approve:{payment_id}"),
-            InlineKeyboardButton("❌ Reject", callback_data=f"payment:reject:{payment_id}"),
+            InlineKeyboardButton("❌ Reject",  callback_data=f"payment:reject:{payment_id}"),
         ]]
     )
     message = (
-        f"<b>Gemini payment verification</b>\n\nID: <code>#{payment_id}</code>\n"
+        f"<b>💳 Payment Verification</b>\n\n"
+        f"ID: <code>#{payment_id}</code>\n"
+        f"Product: <b>{product_label}</b>\n"
         f"User: <code>{payment['user_id']}</code> @{_safe_html(payment['username'] or '-')}\n"
-        f"Method: <b>{_safe_html(payment['method'])}</b>\nAmount: <b>{_safe_html(payment['amount'])}</b>\n"
-        f"Reference: <code>{_safe_html(payment['reference'])}</code>\nEmail: {_safe_html(payment['email'] or '-')}"
+        f"Method: <b>{_safe_html(payment['method'])}</b>\n"
+        f"Amount: <b>{_safe_html(payment['amount'])}</b>\n"
+        f"Reference: <code>{_safe_html(payment['reference'])}</code>\n"
+        f"Email: {_safe_html(payment['email'] or '-')}"
     )
     for admin_id in _admin_ids():
         try:
@@ -1361,23 +1945,35 @@ async def _review_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
             "UPDATE payment_requests SET status = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ? AND status = 'pending'",
             (new_status, datetime.now().isoformat(), admin.id, payment_id),
         )
+    # Determine which product this payment is for
+    pkey = payment["product_key"] if "product_key" in payment.keys() else "gemini"
+    back_product = f"product:{pkey}" if pkey in _PRODUCT_CATALOG else "product:gemini"
     if not approved:
         await _update_user_payment_message(
-            context,
-            payment,
-            "<b>Payment rejected</b>\n\nThe transfer could not be verified." if _is_english(update) else "<b>Pembayaran ditolak</b>\n\nTransfer tidak dapat diverifikasi.",
-            _back_keyboard("product:gemini"),
+            context, payment,
+            "<b>Payment rejected</b>\n\nThe transfer could not be verified."
+            if _is_english(update)
+            else "<b>Pembayaran ditolak</b>\n\nTransfer tidak dapat diverifikasi.",
+            _back_keyboard(back_product),
         )
         await _safe_edit_text(update, f"Payment #{payment_id} rejected.", reply_markup=_back_keyboard("admin:menu"))
         return
     try:
-        product = await _find_gemini_product()
-        order = await _create_gemini_order(payment["user_id"], product, payment["email"], charge_coins=False)
+        # Route fulfillment to the correct ProdSeller product
+        if pkey in _PRODUCT_CATALOG:
+            product = await _find_catalog_product(pkey)
+            order   = await _create_catalog_order(payment["user_id"], pkey, product, payment["email"], charge_coins=False)
+            cfg = _PRODUCT_CATALOG[pkey]
+            product_label = f"{cfg['emoji']} {cfg['label_en']}"
+        else:
+            product = await _find_gemini_product()
+            order   = await _create_gemini_order(payment["user_id"], product, payment["email"], charge_coins=False)
+            product_label = "✨ Gemini Pro"
         with _db() as connection:
             connection.execute("UPDATE payment_requests SET provider_order_id = ? WHERE id = ?", (order.get("orderId"), payment_id))
         delivered = order.get("deliveredKey") or ", ".join(order.get("deliveredKeys", []))
         user_message = (
-            f"<b>Payment verified</b>\n\nGemini Pro order: <code>{_safe_html(order.get('orderId', '-'))}</code>\n"
+            f"<b>Payment verified</b>\n\n{product_label} order: <code>{_safe_html(order.get('orderId', '-'))}</code>\n"
             + (f"Link/key: <code>{_safe_html(delivered)}</code>" if delivered else f"Status: <b>{_safe_html(order.get('status', 'pending'))}</b>")
         )
         await _update_user_payment_message(context, payment, user_message, _back_keyboard("menu:main"))
@@ -1386,8 +1982,7 @@ async def _review_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
         with _db() as connection:
             connection.execute("UPDATE payment_requests SET status = 'provider_failed' WHERE id = ?", (payment_id,))
         await _update_user_payment_message(
-            context,
-            payment,
+            context, payment,
             "<b>Payment verified</b>\n\nProvider fulfillment is pending. Admin will follow up."
             if _is_english(update)
             else "<b>Pembayaran terverifikasi</b>\n\nPengiriman provider masih tertunda. Admin akan menindaklanjuti.",
@@ -1395,40 +1990,13 @@ async def _review_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
         )
         await _safe_edit_text(update, f"Payment verified, provider fulfillment failed: {exc}", reply_markup=_back_keyboard("admin:menu"))
 async def _complete_gemini_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, email: str | None = None) -> None:
-    user = _user_from_update(update)
-    if not user:
-        return
-    try:
-        product = await _find_gemini_product()
-        order = await _create_gemini_order(user["user_id"], product, email)
-    except ProdSellerFundingError as exc:
-        message = (
-            "Gemini Pro is temporarily unavailable because the provider balance is insufficient. Please try again later."
-            if _is_english(update)
-            else "Gemini Pro sementara tidak tersedia karena saldo provider tidak mencukupi. Silakan coba lagi nanti."
-        )
-        await _present_text(update, message, reply_markup=_back_keyboard())
-        logger.info("Gemini order blocked by provider balance: %s", exc)
-        return
-    except ProdSellerError as exc:
-        message = str(exc)
-        if "Insufficient coin" in message:
-            message = "Saldo coin tidak cukup untuk membeli Gemini Pro." if not _is_english(update) else "Your coin balance is not enough to buy Gemini Pro."
-        else:
-            message = "Gemini Pro order failed. Your coins were refunded." if not _is_english(update) else "The Gemini Pro order failed. Your coins were refunded."
-        await _present_text(update, message, reply_markup=_back_keyboard())
-        logger.info("Gemini order failed: %s", exc)
-        return
-    status = order.get("status", "pending")
-    delivered = order.get("deliveredKey") or ", ".join(order.get("deliveredKeys", []))
-    if delivered:
-        message = f"<b>Gemini Pro delivered</b>\n\nOrder: <code>{_safe_html(order.get('orderId', '-'))}</code>\nKey: <code>{_safe_html(delivered)}</code>"
-    else:
-        message = (
-            f"<b>Gemini Pro order created</b>\n\nOrder: <code>{_safe_html(order.get('orderId', '-'))}</code>\n"
-            f"Status: <b>{_safe_html(status)}</b>\n\nThe provider will complete activation shortly."
-        )
-    await _present_text(update, message, parse_mode="HTML", reply_markup=_back_keyboard())
+    english = _is_english(update)
+    message = (
+        "Coins can only be used for Canva document generation. Please purchase Gemini Pro via QRIS or Binance USDT."
+        if english
+        else "Koin hanya dapat digunakan untuk pembuatan dokumen Canva. Silakan beli Gemini Pro melalui QRIS atau Binance USDT."
+    )
+    await _present_text(update, message, reply_markup=_back_keyboard("gemini:payment_methods"))
 
 
 async def schools(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1504,6 +2072,70 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         await show_payment_instruction(update, context, data.split(":", 2)[2])
         return
 
+    if data.startswith("catalog_buy:"):
+        key = data.split(":", 1)[1]
+        if key not in _PRODUCT_CATALOG:
+            await _safe_edit_text(update, "Product not found.", reply_markup=_back_keyboard())
+            return
+        cfg = _PRODUCT_CATALOG[key]
+        if not _prodseller_configured():
+            stock = _setting(cfg["stock_key"], 0)
+            if stock <= 0:
+                await _safe_edit_text(
+                    update,
+                    f"{cfg['label_en']} is currently out of stock." if _is_english(update) else f"{cfg['label_id']} sedang habis stok.",
+                    reply_markup=_back_keyboard(f"product:{key}"),
+                )
+                return
+            await _show_catalog_payment_methods(update, context, key)
+            return
+        try:
+            product = await _find_catalog_product(key)
+        except ProdSellerError:
+            await _safe_edit_text(
+                update,
+                f"{cfg['label_en']} is currently unavailable." if _is_english(update) else f"{cfg['label_id']} sedang tidak tersedia.",
+                reply_markup=_back_keyboard(f"product:{key}"),
+            )
+            return
+        if product.get("inStock") is False or product.get("stock") == 0:
+            await _safe_edit_text(
+                update,
+                f"{cfg['label_en']} is currently out of stock." if _is_english(update) else f"{cfg['label_id']} sedang habis stok.",
+                reply_markup=_back_keyboard(f"product:{key}"),
+            )
+            return
+        if product.get("requiresEmailActivation"):
+            context.user_data["buying_product"] = key
+            context.user_data["step"] = f"catalog_payment_email:{key}"
+            await _safe_edit_text(
+                update,
+                "Send the activation email before choosing a payment method."
+                if _is_english(update)
+                else "Kirim email aktivasi sebelum memilih metode pembayaran.",
+                reply_markup=_back_keyboard(f"product:{key}"),
+            )
+        else:
+            await _show_catalog_payment_methods(update, context, key)
+        return
+
+    if data.startswith("catalog_payment_methods:"):
+        key = data.split(":", 1)[1]
+        if key in _PRODUCT_CATALOG:
+            await _show_catalog_payment_methods(update, context, key)
+        return
+
+    if data.startswith("catalog_pay:"):
+        parts = data.split(":", 2)
+        if len(parts) == 3:
+            key, method = parts[1], parts[2]
+            if key in _PRODUCT_CATALOG:
+                if method == "coins":
+                    await _complete_catalog_coin_purchase(update, context, key)
+                elif method in {"binance", "qris"}:
+                    await _show_catalog_payment_instruction(update, context, key, method)
+        return
+
     if data.startswith("payment:"):
         parts = data.split(":")
         if len(parts) == 3 and parts[1] in {"approve", "reject"} and parts[2].isdigit():
@@ -1511,25 +2143,7 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         return
 
     if data == "gemini:legacy_buy":
-        try:
-            product = await _find_gemini_product()
-        except ProdSellerError:
-            await _safe_edit_text(update, "Gemini Pro is temporarily unavailable.", reply_markup=_back_keyboard())
-            return
-        if product.get("inStock") is False or product.get("stock") == 0:
-            await _safe_edit_text(update, "Gemini Pro is currently out of stock.", reply_markup=_back_keyboard())
-            return
-        if product.get("requiresEmailActivation"):
-            context.user_data["step"] = "gemini_email"
-            await _safe_edit_text(
-                update,
-                "Send the email address for activation. Your email is sent to the provider only for this order."
-                if _is_english(update)
-                else "Kirim alamat email untuk aktivasi. Email hanya dikirim ke provider untuk order ini.",
-                reply_markup=_back_keyboard(),
-            )
-        else:
-            await _complete_gemini_purchase(update, context)
+        await show_gemini_payment_methods(update, context)
         return
 
     if data == "wizard:document_types":
@@ -1614,24 +2228,95 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         await show_provider_balance(update, context)
         return
 
+    if data == "admin:tx_history":
+        await show_admin_transaction_history(update, context, tab="payments", page=0)
+        return
+
+    if data.startswith("admin:tx:"):
+        parts = data.split(":")
+        tab = parts[2] if len(parts) > 2 else "payments"
+        page = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+        await show_admin_transaction_history(update, context, tab=tab, page=page)
+        return
+
     if data == "admin:prices":
         context.user_data["step"] = "admin_prices"
         await _safe_edit_text(
             update,
-            "Send: `doc_price gemini_price checkin_reward referral_reward`\nExample: `3 20 1 2`" if _is_english(update) else "Kirim format: `doc_price gemini_price checkin_reward referral_reward`\nContoh: `3 20 1 2`",
+            "Send: `doc_price checkin_reward referral_reward`\nExample: `3 1 2`" if _is_english(update) else "Kirim format: `doc_price checkin_reward referral_reward`\nContoh: `3 1 2`",
             parse_mode="Markdown",
             reply_markup=_back_keyboard("admin:menu"),
         )
         return
 
-    if data == "admin:gemini_prices":
-        context.user_data["step"] = "admin_gemini_prices"
-        await _safe_edit_text(
-            update,
-            "Send: `CUSTOMER_IDR QRIS_IDR BINANCE_USDT`\nExample: `15000 20000 0.60`" if _is_english(update) else "Kirim: `HARGA_CUSTOMER HARGA_QRIS HARGA_BINANCE`\nContoh: `15000 20000 0.60`",
-            parse_mode="Markdown",
-            reply_markup=_back_keyboard("admin:menu"),
+    if data in {"admin:product_prices", "admin:gemini_prices"}:
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
+            return
+        english = _is_english(update)
+        text = (
+            "*🏷️ Digital Product Pricing*\n\nSelect a product to update prices (Customer Menu, QRIS, Binance USDT):"
+            if english else
+            "*🏷️ Kelola Harga Produk Digital*\n\nPilih produk yang ingin diatur harganya (Menu Utama, QRIS, Binance USDT):"
         )
+        buttons = [
+            [InlineKeyboardButton("✨ Gemini Pro", callback_data="admin:price_target:gemini")],
+            [InlineKeyboardButton("🎥 CapCut Pro", callback_data="admin:price_target:capcut")],
+            [InlineKeyboardButton("🤖 Claude API", callback_data="admin:price_target:claude")],
+            [InlineKeyboardButton("💻 GPT Codex", callback_data="admin:price_target:codex")],
+            [InlineKeyboardButton("📺 Prime Video", callback_data="admin:price_target:primevideo")],
+            [InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="admin:menu")],
+        ]
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if data.startswith("admin:price_target:"):
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
+            return
+        target = data.split(":", 2)[2]
+        context.user_data["admin_price_target"] = target
+        context.user_data["step"] = "admin_product_prices"
+        english = _is_english(update)
+        if target == "gemini":
+            label = "Gemini Pro"
+            p_idr = _format_idr(_setting("gemini_price_idr", 20000))
+            p_qris = _format_idr(_setting("gemini_qris_price_idr", 20000))
+            p_binance = _setting_text("gemini_binance_price_usdt", "0.60")
+        elif target in _PRODUCT_CATALOG:
+            cfg = _PRODUCT_CATALOG[target]
+            label = cfg["label_en"] if english else cfg["label_id"]
+            p_idr = _format_idr(_setting(cfg["price_idr_key"], cfg["default_idr"]))
+            p_qris = _format_idr(_setting(cfg["price_qris_key"], cfg["default_qris_idr"]))
+            p_binance = _setting_text(cfg["price_binance_key"], cfg["default_binance_usdt"])
+        else:
+            return
+
+        if english:
+            text = (
+                f"*🏷️ {label} Price Management*\n\n"
+                f"Current prices:\n"
+                f"• Menu Price: *{p_idr}*\n"
+                f"• QRIS: *{p_qris}*\n"
+                f"• Binance: *{p_binance} USDT*\n\n"
+                "Send the new prices:\n"
+                "`CUSTOMER_IDR QRIS_IDR BINANCE_USDT`\n\n"
+                "Example: `30000 30000 1.7`\n"
+                "_(Or send 1 number if Menu & QRIS are the same, e.g. `30000`)_"
+            )
+        else:
+            text = (
+                f"*🏷️ Pengaturan Harga {label}*\n\n"
+                f"Harga saat ini:\n"
+                f"• Harga Menu: *{p_idr}*\n"
+                f"• QRIS: *{p_qris}*\n"
+                f"• Binance: *{p_binance} USDT*\n\n"
+                "Kirim harga baru dengan format:\n"
+                "`HARGA_MENU HARGA_QRIS HARGA_BINANCE_USDT`\n\n"
+                "Contoh: `30000 30000 1.7`\n"
+                "_(Atau kirim 1 angka jika Harga Menu & QRIS sama, contoh: `30000`)_"
+            )
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=_back_keyboard("admin:product_prices"))
         return
 
     if data == "admin:redeem":
@@ -1658,53 +2343,111 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         if not _is_admin(update.effective_user.id if update.effective_user else None):
             await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
             return
-        current_stock = _setting("gemini_manual_stock", 0)
-        if _is_english(update):
+        english = _is_english(update)
+        text = (
+            "*📦 Product Stock Management*\n\nSelect a product to update stock:"
+            if english else
+            "*📦 Kelola Stok Produk*\n\nPilih produk yang ingin diatur stoknya:"
+        )
+        buttons = [
+            [InlineKeyboardButton("✨ Gemini Pro", callback_data="admin:stock_target:gemini")],
+            [InlineKeyboardButton("🎥 CapCut Pro", callback_data="admin:stock_target:capcut")],
+            [InlineKeyboardButton("🤖 Claude API", callback_data="admin:stock_target:claude")],
+            [InlineKeyboardButton("💻 GPT Codex", callback_data="admin:stock_target:codex")],
+            [InlineKeyboardButton("📺 Prime Video", callback_data="admin:stock_target:primevideo")],
+            [InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="admin:menu")],
+        ]
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if data.startswith("admin:stock_target:"):
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
+            return
+        target = data.split(":", 2)[2]
+        context.user_data["admin_stock_target"] = target
+        context.user_data["step"] = ADMIN_SET_STOCK
+        english = _is_english(update)
+        if target == "gemini":
+            current_stock = _setting("gemini_manual_stock", 0)
+            label = "Gemini Pro"
+        elif target in _PRODUCT_CATALOG:
+            cfg = _PRODUCT_CATALOG[target]
+            current_stock = _setting(cfg["stock_key"], 0)
+            label = cfg["label_en"] if english else cfg["label_id"]
+        else:
+            return
+        if english:
             text = (
-                f"*📦 Gemini Stock Management*\n\n"
+                f"*📦 {label} Stock Management*\n\n"
                 f"Current stock: *{current_stock} units*\n\n"
                 "Send a number to update the stock count.\n"
                 "Example: `15`"
             )
         else:
             text = (
-                f"*📦 Kelola Stok Gemini*\n\n"
+                f"*📦 Kelola Stok {label}*\n\n"
                 f"Stok saat ini: *{current_stock} unit*\n\n"
                 "Kirim angka untuk memperbarui jumlah stok.\n"
                 "Contoh: `15`"
             )
-        context.user_data["step"] = ADMIN_SET_STOCK
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="admin:menu")]]
-        )
-        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=keyboard)
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=_back_keyboard("admin:stock"))
         return
 
     if data == "admin:info":
         if not _is_admin(update.effective_user.id if update.effective_user else None):
             await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
             return
-        current_info = _setting_text("gemini_info", "")
-        preview = current_info if current_info.strip() else ("-" if _is_english(update) else "-")
-        if _is_english(update):
+        english = _is_english(update)
+        text = (
+            "*ℹ️ Product Info Management*\n\nSelect a product to update info message:"
+            if english else
+            "*ℹ️ Kelola Info Produk*\n\nPilih produk yang ingin diatur pesan infonya:"
+        )
+        buttons = [
+            [InlineKeyboardButton("✨ Gemini Pro", callback_data="admin:info_target:gemini")],
+            [InlineKeyboardButton("🎥 CapCut Pro", callback_data="admin:info_target:capcut")],
+            [InlineKeyboardButton("🤖 Claude API", callback_data="admin:info_target:claude")],
+            [InlineKeyboardButton("💻 GPT Codex", callback_data="admin:info_target:codex")],
+            [InlineKeyboardButton("📺 Prime Video", callback_data="admin:info_target:primevideo")],
+            [InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="admin:menu")],
+        ]
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if data.startswith("admin:info_target:"):
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
+            return
+        target = data.split(":", 2)[2]
+        context.user_data["admin_info_target"] = target
+        context.user_data["step"] = ADMIN_SET_INFO
+        english = _is_english(update)
+        if target == "gemini":
+            current_info = _setting_text("gemini_info", "")
+            label = "Gemini Pro"
+        elif target in _PRODUCT_CATALOG:
+            cfg = _PRODUCT_CATALOG[target]
+            current_info = _setting_text(cfg["info_key"], "")
+            label = cfg["label_en"] if english else cfg["label_id"]
+        else:
+            return
+        preview = current_info if current_info.strip() else "-"
+        if english:
             text = (
-                f"*ℹ️ Gemini Product Info*\n\n"
+                f"*ℹ️ {label} Info*\n\n"
                 f"Current info text:\n_{preview}_\n\n"
-                "Send the new info text to display in the Gemini Pro purchase chat.\n"
+                f"Send the new info text to display in the {label} purchase chat.\n"
                 "Send `-` to clear the info."
             )
         else:
             text = (
-                f"*ℹ️ Info Produk Gemini*\n\n"
+                f"*ℹ️ Info {label}*\n\n"
                 f"Teks info saat ini:\n_{preview}_\n\n"
-                "Kirim teks info baru yang akan ditampilkan di chat pembelian Gemini Pro.\n"
+                f"Kirim teks info baru yang akan ditampilkan di chat pembelian {label}.\n"
                 "Kirim `-` untuk menghapus info."
             )
-        context.user_data["step"] = ADMIN_SET_INFO
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="admin:menu")]]
-        )
-        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=keyboard)
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=_back_keyboard("admin:info"))
         return
 
     if data == "admin:broadcast":
@@ -1933,6 +2676,33 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await _create_payment_request(update, context, reference, photo_file_id)
         return
 
+    if isinstance(step, str) and step.startswith("catalog_payment_email:"):
+        key = step.split(":", 1)[1]
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", text):
+            await update.message.reply_text(
+                "Please send a valid email address." if _is_english(update) else "Silakan kirim alamat email yang valid.",
+                reply_markup=_back_keyboard(f"product:{key}"),
+            )
+            return
+        context.user_data["product_email"] = text
+        context.user_data.pop("step", None)
+        await _show_catalog_payment_methods(update, context, key)
+        return
+
+    if isinstance(step, str) and step.startswith("catalog_payment:"):
+        parts = step.split(":")
+        if len(parts) == 3:
+            key, method = parts[1], parts[2]
+            if not text and not photo_file_id:
+                await update.message.reply_text(
+                    "Send a transaction reference or screenshot." if _is_english(update) else "Kirim referensi transaksi atau screenshot.",
+                    reply_markup=_back_keyboard(f"catalog_payment_methods:{key}"),
+                )
+                return
+            reference = text or "Screenshot evidence"
+            await _create_catalog_payment_request(update, context, key, reference, photo_file_id)
+            return
+
     if step == REDEEM_CODE:
         user = _user_from_update(update)
         code = text.upper()
@@ -2009,12 +2779,21 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
             return
         new_stock = int(text)
-        _set_setting("gemini_manual_stock", new_stock)
+        target = context.user_data.pop("admin_stock_target", "gemini")
+        if target == "gemini":
+            _set_setting("gemini_manual_stock", new_stock)
+            label = "Gemini Pro"
+        elif target in _PRODUCT_CATALOG:
+            cfg = _PRODUCT_CATALOG[target]
+            _set_setting(cfg["stock_key"], new_stock)
+            label = cfg["label_en"] if _is_english(update) else cfg["label_id"]
+        else:
+            label = target
         context.user_data.pop("step", None)
         await update.message.reply_text(
-            f"✅ Gemini stock updated to *{new_stock}* units."
+            f"✅ {label} stock updated to *{new_stock}* units."
             if _is_english(update)
-            else f"✅ Stok Gemini berhasil diperbarui menjadi *{new_stock}* unit.",
+            else f"✅ Stok {label} berhasil diperbarui menjadi *{new_stock}* unit.",
             parse_mode="Markdown",
         )
         await show_admin_menu(update, context)
@@ -2031,32 +2810,91 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
             return
         new_info = "" if text.strip() == "-" else text.strip()
-        _set_setting_text("gemini_info", new_info)
+        target = context.user_data.pop("admin_info_target", "gemini")
+        if target == "gemini":
+            _set_setting_text("gemini_info", new_info)
+            label = "Gemini Pro"
+        elif target in _PRODUCT_CATALOG:
+            cfg = _PRODUCT_CATALOG[target]
+            _set_setting_text(cfg["info_key"], new_info)
+            label = cfg["label_en"] if _is_english(update) else cfg["label_id"]
+        else:
+            label = target
         context.user_data.pop("step", None)
         if new_info:
             reply = (
-                f"✅ Gemini info updated.\n\n_{new_info}_"
+                f"✅ {label} info updated.\n\n_{new_info}_"
                 if _is_english(update)
-                else f"✅ Info Gemini berhasil diperbarui.\n\n_{new_info}_"
+                else f"✅ Info {label} berhasil diperbarui.\n\n_{new_info}_"
             )
         else:
-            reply = "✅ Gemini info cleared." if _is_english(update) else "✅ Info Gemini berhasil dihapus."
+            reply = f"✅ {label} info cleared." if _is_english(update) else f"✅ Info {label} berhasil dihapus."
         await update.message.reply_text(reply, parse_mode="Markdown")
         await show_admin_menu(update, context)
         return
 
-    if step == "admin_gemini_prices":
+    if step in {"admin_product_prices", "admin_gemini_prices"}:
         if not _is_admin(update.effective_user.id if update.effective_user else None):
             return
-        match = re.fullmatch(r"(\d+)\s+(\d+)\s+(\d+(?:\.\d{1,2})?)", text)
-        if not match or int(match.group(1)) <= 0 or int(match.group(2)) <= 0 or float(match.group(3)) <= 0:
-            await update.message.reply_text("Format tidak valid. Gunakan: `15000 20000 0.60`", parse_mode="Markdown")
+        target = context.user_data.get("admin_price_target") or "gemini"
+        english = _is_english(update)
+        tokens = text.split()
+        if len(tokens) == 1 and tokens[0].isdigit() and int(tokens[0]) > 0:
+            price_idr = int(tokens[0])
+            qris_idr = price_idr
+            binance_usdt = None
+        elif len(tokens) == 2 and tokens[0].isdigit() and int(tokens[0]) > 0:
+            price_idr = int(tokens[0])
+            qris_idr = price_idr
+            try:
+                binance_usdt = float(tokens[1])
+                if binance_usdt <= 0:
+                    raise ValueError
+            except ValueError:
+                await update.message.reply_text("Format USDT tidak valid. Contoh: `30000 1.7`")
+                return
+        elif len(tokens) == 3 and tokens[0].isdigit() and tokens[1].isdigit() and int(tokens[0]) > 0 and int(tokens[1]) > 0:
+            price_idr = int(tokens[0])
+            qris_idr = int(tokens[1])
+            try:
+                binance_usdt = float(tokens[2])
+                if binance_usdt <= 0:
+                    raise ValueError
+            except ValueError:
+                await update.message.reply_text("Format USDT tidak valid. Contoh: `30000 30000 1.7`")
+                return
+        else:
+            await update.message.reply_text(
+                "Format tidak valid. Gunakan: `HARGA_MENU HARGA_QRIS HARGA_BINANCE`\nContoh: `30000 30000 1.7` atau `30000`",
+                parse_mode="Markdown",
+            )
             return
-        _set_setting("gemini_price_idr", int(match.group(1)))
-        _set_setting("gemini_qris_price_idr", int(match.group(2)))
-        _set_setting("gemini_binance_price_usdt", float(match.group(3)))
+
+        if target == "gemini":
+            label = "Gemini Pro"
+            _set_setting("gemini_price_idr", price_idr)
+            _set_setting("gemini_qris_price_idr", qris_idr)
+            if binance_usdt is not None:
+                _set_setting_text("gemini_binance_price_usdt", str(binance_usdt))
+        elif target in _PRODUCT_CATALOG:
+            cfg = _PRODUCT_CATALOG[target]
+            label = cfg["label_en"] if english else cfg["label_id"]
+            _set_setting(cfg["price_idr_key"], price_idr)
+            _set_setting(cfg["price_qris_key"], qris_idr)
+            if binance_usdt is not None:
+                _set_setting_text(cfg["price_binance_key"], str(binance_usdt))
+        else:
+            return
+
         context.user_data.pop("step", None)
-        await update.message.reply_text("Harga customer Gemini berhasil diperbarui.")
+        context.user_data.pop("admin_price_target", None)
+        usdt_info = f", Binance: *{binance_usdt} USDT*" if binance_usdt is not None else ""
+        msg = (
+            f"✅ *{label}* price updated:\nMenu: *{_format_idr(price_idr)}*, QRIS: *{_format_idr(qris_idr)}*{usdt_info}"
+            if english else
+            f"✅ Harga *{label}* berhasil diperbarui:\nMenu: *{_format_idr(price_idr)}*, QRIS: *{_format_idr(qris_idr)}*{usdt_info}"
+        )
+        await update.message.reply_text(msg, parse_mode="Markdown")
         await show_admin_menu(update, context)
         return
 
@@ -2064,13 +2902,23 @@ async def handle_text_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not _is_admin(update.effective_user.id if update.effective_user else None):
             return
         values = text.split()
-        if len(values) != 4 or not all(value.isdigit() for value in values):
-            await update.message.reply_text("Format tidak valid. Gunakan: `3 20 1 2`", parse_mode="Markdown")
+        if not all(value.isdigit() for value in values):
+            await update.message.reply_text("Format tidak valid. Gunakan: `3 1 2` (doc_price checkin_reward referral_reward)", parse_mode="Markdown")
             return
-        for key, value in zip(("doc_price", "gemini_price", "checkin_reward", "referral_reward"), values):
-            _set_setting(key, int(value))
+        if len(values) == 3:
+            _set_setting("doc_price", int(values[0]))
+            _set_setting("checkin_reward", int(values[1]))
+            _set_setting("referral_reward", int(values[2]))
+        elif len(values) == 4:
+            _set_setting("doc_price", int(values[0]))
+            _set_setting("gemini_price", int(values[1]))
+            _set_setting("checkin_reward", int(values[2]))
+            _set_setting("referral_reward", int(values[3]))
+        else:
+            await update.message.reply_text("Format tidak valid. Gunakan: `3 1 2` (doc_price checkin_reward referral_reward)", parse_mode="Markdown")
+            return
         context.user_data.pop("step", None)
-        await update.message.reply_text("Pengaturan harga dan reward berhasil diperbarui.")
+        await update.message.reply_text("Pengaturan harga Canva doc dan reward koin berhasil diperbarui.")
         await show_admin_menu(update, context)
         return
 

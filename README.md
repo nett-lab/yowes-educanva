@@ -265,7 +265,7 @@ A Telegram bot is also available for lightweight, on-the-go document generation.
 - Persistent coin balance and activity storage in SQLite
 - Coin transaction history with charges, rewards, refunds, and admin grants
 - Gemini Pro stock management with JIO links, descriptions, and live stock count
-- Optional Prodseller API integration for live Gemini products, stock, and orders
+- Optional Prodseller API integration for live Gemini products, stock, and orders ([PRODSELLER API](https://prodseller.com/api-docs/))
 - Automatic localized redeem-code announcements with a one-tap redeem button
 - Mandatory subscription gate for `t.me/canvaproteam04` before using bot features
 - Automatic permanent deletion of generated Telegram images after 10 minutes
@@ -356,21 +356,20 @@ generate - Generate documents with the quick command format
 - The same country and school validation rules used by the MCP server are applied here.
 - For best results, wrap school names and position titles in quotes when they contain spaces.
 
-### Prodseller Gemini integration
+### Prodseller Product Catalog Integration (Gemini, CapCut, Claude AI, GPT Codex, Prime Video)
 
-When `PRODSELLER_API_KEY` is configured, the Gemini menu uses:
+When `PRODSELLER_API_KEY` is configured, the bot integrates seamlessly with the ProdSeller API (`https://prodseller.com/v1`):
 
-- `GET /v1/products` to find the configured Gemini product and show live stock.
-- `POST /v1/orders` to create an order with `X-API-Key` and a unique `Idempotency-Key`.
-- An activation email only when the product declares `requiresEmailActivation`.
-- Automatic coin refund when the provider rejects an order.
-- A provider-balance preflight prevents local coin deduction when the Prodseller USDT balance cannot fund the order.
-
-Gemini payment can also be requested through Binance (`0.60 USDT`) or QRIS (`Rp20.000`). The bot stores the payment request and sends it to admins for manual verification. Only an approved request creates the Prodseller order and sends the delivered link/key to the buyer. Rejected transfers notify the buyer that the payment was cancelled. This flow does not claim blockchain confirmation automatically; admins must verify the TXID or QRIS evidence in the official Binance/payment account.
-
-Use the exact Binance deposit address and network supplied by the admin. Never send USDT to an address copied from an untrusted message, and never place a private key in the bot configuration. When `QRIS_IMAGE_PATH` points to `QRIS-SUKSES-BERSAMA.jpeg`, the QRIS image is sent directly inside Telegram; `QRIS_IMAGE_URL` is only a fallback.
-
-If the API key is not configured, the existing local Gemini stock menu remains available and no provider request is made. Never place the Prodseller API key in `.env` committed to GitHub, README files, logs, or Telegram messages.
+- **Products Available**:
+  - ✨ **Gemini Pro 18 Bulan**: `PRODSELLER_PRODUCT_ID` / `PRODSELLER_PRODUCT_NAME` (Default: `Gemini Pro`)
+  - 🎥 **CapCut Pro**: `PRODSELLER_CAPCUT_ID` / `PRODSELLER_CAPCUT_NAME` (Default: `CapCut`)
+  - 🤖 **Claude API**: `PRODSELLER_CLAUDE_ID` / `PRODSELLER_CLAUDE_NAME` (Default: `Claude`)
+  - 💻 **GPT Codex**: `PRODSELLER_CODEX_ID` / `PRODSELLER_CODEX_NAME` (Default: `GPT Codex`)
+  - 📺 **Prime Video**: `PRODSELLER_PRIMEVIDEO_ID` / `PRODSELLER_PRIMEVIDEO_NAME` (Default: `Prime Video`)
+- **Product Info**: Each product automatically displays the live `description` from the ProdSeller API (`GET /v1/products`) in the purchase chat. Admins can also configure a custom info override or rely on built-in curated default specifications if ProdSeller description is empty.
+- **Stock & Orders**: Real-time stock status from ProdSeller (`inStock` & `stock`), orders created via `POST /v1/orders` with idempotency protection, and instant key/link delivery.
+- **Payment Options**: Binance USDT transfer and QRIS IDR with admin receipt verification (coins are exclusively reserved for Canva Education document generation).
+- **Fallback Mode**: If `PRODSELLER_API_KEY` is not set, all products fallback to local stock and manual admin review without breaking the bot.
 
 ---
 
