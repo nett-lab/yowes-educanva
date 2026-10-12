@@ -42,6 +42,8 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE_PATH = DATA_DIR / "bot.sqlite3"
 REQUIRED_CHANNEL = "@canvaproteam04"
 REQUIRED_CHANNEL_URL = "https://t.me/canvaproteam04"
+SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@TeamPr0_07")
+SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/TeamPr0_07")
 MEDIA_RETENTION_SECONDS = 10 * 60
 MEDIA_CLEANUP_INTERVAL_SECONDS = 60
 _media_cleanup_task: asyncio.Task | None = None
@@ -134,6 +136,107 @@ _BROADCAST_TYPES: dict[str, tuple[str, str, str]] = {
     "info":   ("📢", "Info Umum",       "General Info"),
     "promo":  ("🔥", "Promo Spesial",   "Special Promo"),
     "custom": ("✏️", "Pesan Kustom",    "Custom Message"),
+}
+
+_BROADCAST_TEMPLATES: dict[str, dict[str, str]] = {
+    "flash": {
+        "id": (
+            "⚡ *FLASH SALE TERBATAS!* ⚡\n\n"
+            "Dapatkan penawaran harga hemat spesial hari ini untuk semua akun premium & Canva Edu!\n\n"
+            "🔥 *Slot & Kuota Sangat Terbatas!*\n"
+            "Segera amankan pesanan Anda melalui menu utama sebelum promo berakhir."
+        ),
+        "en": (
+            "⚡ *LIMITED FLASH SALE ALERT!* ⚡\n\n"
+            "Special discounted prices available today for all premium accounts & Canva Edu!\n\n"
+            "🔥 *Limited Slots Available!*\n"
+            "Order now through the main menu before the flash deal ends."
+        ),
+    },
+    "bonus": {
+        "id": (
+            "🎁 *KLAIM BONUS & HADIAH KOIN* 🎁\n\n"
+            "Terima kasih telah setia menggunakan layanan kami!\n\n"
+            "✨ *Cara Dapatkan Koin Gratis:*\n"
+            "• Lakukan Daily Check-in setiap hari\n"
+            "• Bagikan link referral Anda ke teman-teman\n\n"
+            "Koin dapat langsung digunakan untuk pembuatan dokumen Canva Edu tanpa biaya!"
+        ),
+        "en": (
+            "🎁 *CLAIM YOUR BONUS & REWARD COINS* 🎁\n\n"
+            "Thank you for being our loyal member!\n\n"
+            "✨ *How to Earn Free Coins:*\n"
+            "• Claim your Daily Check-in bonus\n"
+            "• Share your referral link with friends\n\n"
+            "Use your coins to generate Canva Edu documents completely free!"
+        ),
+    },
+    "stock": {
+        "id": (
+            "📦 *UPDATE STOK PRODUK TERSEDIA* 📦\n\n"
+            "Kabar gembira! Stok akun digital & lisensi resmi telah di-restock:\n\n"
+            "• 🎥 CapCut Pro\n"
+            "• 🤖 Claude AI API\n"
+            "• 💻 GPT Codex\n"
+            "• 📺 Prime Video\n"
+            "• 🎓 Gemini Pro\n\n"
+            "🚀 *Proses Otomatis & Cepat*\n"
+            "Pembayaran instan via QRIS & USDT BinancePay 24/7."
+        ),
+        "en": (
+            "📦 *PRODUCT RESTOCK ANNOUNCEMENT* 📦\n\n"
+            "Great news! Digital accounts & subscriptions are now fully restocked:\n\n"
+            "• 🎥 CapCut Pro\n"
+            "• 🤖 Claude AI API\n"
+            "• 💻 GPT Codex\n"
+            "• 📺 Prime Video\n"
+            "• 🎓 Gemini Pro\n\n"
+            "🚀 *Instant & Automated Delivery*\n"
+            "Available 24/7 via QRIS & USDT BinancePay."
+        ),
+    },
+    "info": {
+        "id": (
+            "📢 *INFORMASI & LAYANAN SISTEM* 📢\n\n"
+            "Halo semuanya! Seluruh server dan layanan otomatisasi kami berjalan lancar & optimal.\n\n"
+            "💡 *Kemudahan Transaksi:*\n"
+            "• QRIS otomatis real-time\n"
+            "• Binance Pay USDT aman tanpa potongan fee\n\n"
+            "Silakan akses menu utama untuk bertransaksi. Hubungi admin bila membutuhkan bantuan."
+        ),
+        "en": (
+            "📢 *SYSTEM INFORMATION & STATUS* 📢\n\n"
+            "Hello everyone! All bot services and automated delivery systems are running smoothly.\n\n"
+            "💡 *Smooth Transactions:*\n"
+            "• Instant automated QRIS\n"
+            "• Zero gas fee Binance Pay USDT\n\n"
+            "Open the main menu to get started. Contact admin if you need any assistance."
+        ),
+    },
+    "promo": {
+        "id": (
+            "🔥 *PROMO SPESIAL HARI INI* 🔥\n\n"
+            "Upgrade kebutuhan digital, editing video, dan AI tools Anda dengan harga terbaik bergaransi!\n\n"
+            "🎉 Akun legal, proses instan, dan siap pakai.\n"
+            "Buka menu utama bot dan amankan produk favorit Anda sekarang."
+        ),
+        "en": (
+            "🔥 *SPECIAL PROMOTION TODAY* 🔥\n\n"
+            "Upgrade your creative workflow, video editing, and AI tools at special rates!\n\n"
+            "🎉 Guaranteed quality and instant delivery.\n"
+            "Open the main menu now to claim your favorite products."
+        ),
+    },
+    "custom": {
+        "id": (
+            "🔔 *PEMBERITAHUAN TERBARU*\n\n"
+            "Halo sahabat! Ada pembaruan terbaru di bot kami. Silakan cek menu utama untuk melihat fitur dan produk yang tersedia."
+        ),
+        "en": (
+            "🔔 *LATEST ANNOUNCEMENT*\n\n"
+            "Hello everyone! We have updated our services. Please check the main menu for the latest features and available products."
+        ),
+    },
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -816,24 +919,29 @@ async def _create_catalog_payment_request(
 async def _broadcast_announcement(
     context: ContextTypes.DEFAULT_TYPE,
     broadcast_type: str,
-    message_text: str,
+    message_text: str | None = None,
+    use_template: bool = False,
 ) -> int:
-    """Broadcast a free-form announcement to every registered user.
+    """Broadcast an announcement to every registered user.
 
-    Returns the number of users successfully notified. A formatted
-    header (emoji + category label) is prepended automatically and
-    adapts to each user's language preference.
+    Returns the number of users successfully notified.
+    Delivers only the broadcast content without hardcoded title prefixes.
     """
     with _db() as connection:
         users = connection.execute("SELECT user_id, language FROM users").fetchall()
 
-    emoji, label_id, label_en = _BROADCAST_TYPES.get(
-        broadcast_type, ("📢", "Info Umum", "General Info")
-    )
     sent = 0
+    tmpl_data = _BROADCAST_TEMPLATES.get(broadcast_type, _BROADCAST_TEMPLATES.get("info", {}))
     for user in users:
-        label = label_en if user["language"] == "en" else label_id
-        full_message = f"{emoji} *{label}*\n\n{message_text}"
+        lang = user["language"] if user["language"] in ("id", "en") else "id"
+        if use_template:
+            full_message = tmpl_data.get(lang) or tmpl_data.get("id") or (message_text or "")
+        else:
+            full_message = message_text or ""
+
+        if not full_message.strip():
+            continue
+
         try:
             await context.bot.send_message(
                 chat_id=user["user_id"],
@@ -1254,6 +1362,7 @@ def _main_menu_keyboard(update: Update) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("🎟️ Redeem Code", callback_data="redeem:input"),
             ],
             [InlineKeyboardButton("🌐 Bahasa / Language", callback_data="settings:language")],
+            [InlineKeyboardButton("💬 Hubungi Support" if not english else "💬 Contact Support", url=SUPPORT_URL)],
             *([[InlineKeyboardButton("⚙️ Admin Settings", callback_data="admin:menu")]] if _is_admin(update.effective_user.id if update.effective_user else None) else []),
         ]
     )
@@ -1359,22 +1468,50 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_channel_membership(update, context):
         return
-    help_text = (
-        "*Quick guide*\n\n1. Press *Canva Doc Education*\n2. Choose a country\n3. Choose a document type\n4. Complete the profile data\n5. Confirm and receive your PNG files\n\n"
-        "*Quick command*\n`/generate us John Smith \"Valley High\" \"Head of Science Department\" \"12/05/1988\" Male teacher_id,employment_letter`\n\nGender: `Random`, `Male`, `Female`"
-        if _is_english(update)
-        else
-        "*Panduan cepat*\n\n"
-        "1. Tekan *Buat Dokumen Baru*\n"
-        "2. Pilih negara\n"
-        "3. Pilih tipe dokumen\n"
-        "4. Isi nama, sekolah, jabatan, gender, dan tanggal lahir\n"
-        "5. Konfirmasi dan dokumen akan dibuat otomatis\n\n"
-        "*Contoh format cepat*\n"
-        "`/generate us John Smith \"Valley High\" \"Head of Science Department\" \"12/05/1988\" Male teacher_id,employment_letter`\n\n"
-        "Gender: `Random`, `Male`, `Female`"
+    english = _is_english(update)
+    if english:
+        help_text = (
+            "*📖 Service & Feature Guide*\n\n"
+            "🎓 *Canva Doc Education:*\n"
+            "• Select country & document type from the main menu.\n"
+            "• Fill in profile details and confirm.\n"
+            "• Documents generated instantly using coins (🪙).\n\n"
+            "🛍️ *Digital Products:*\n"
+            "• Available: Gemini Pro, CapCut Pro, Claude API, GPT Codex, Prime Video.\n"
+            "• Instant payment via *QRIS* (IDR) & *Binance Pay* (USDT).\n"
+            "• Automated delivery straight to your chat.\n\n"
+            "✨ *Other Menus & Rewards:*\n"
+            "• 🎁 *Daily Check-in:* Free bonus coins every 24 hours.\n"
+            "• 🤝 *Referral Program:* Earn extra coins by inviting friends.\n"
+            "• 🎟️ *Redeem Code:* Claim special promo voucher coins.\n"
+            "• 💬 *Customer Support:* Contact @TeamPr0_07 for assistance."
+        )
+    else:
+        help_text = (
+            "*📖 Panduan Layanan & Fitur*\n\n"
+            "🎓 *Canva Doc Education:*\n"
+            "• Pilih negara & tipe dokumen di menu utama.\n"
+            "• Lengkapi data profil lalu konfirmasi.\n"
+            "• Dokumen dibuat instan menggunakan koin (🪙).\n\n"
+            "🛍️ *Produk Digital:*\n"
+            "• Tersedia: Gemini Pro, CapCut Pro, Claude API, GPT Codex, Prime Video.\n"
+            "• Pembayaran otomatis via *QRIS* (Rupiah) & *Binance Pay* (USDT).\n"
+            "• Akun/lisensi dikirim otomatis langsung ke chat bot.\n\n"
+            "✨ *Menu & Fitur Lainnya:*\n"
+            "• 🎁 *Check-in Harian:* Klaim koin gratis setiap hari.\n"
+            "• 🤝 *Program Referral:* Ajak teman dan dapatkan bonus koin.\n"
+            "• 🎟️ *Redeem Code:* Klaim kode voucher koin hadiah.\n"
+            "• 💬 *Bantuan Support:* Hubungi @TeamPr0_07 untuk bantuan."
+        )
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🏠 Menu Utama" if not english else "🏠 Main Menu", callback_data="menu:main"),
+                InlineKeyboardButton("💬 Hubungi Support" if not english else "💬 Contact Support", url=SUPPORT_URL),
+            ]
+        ]
     )
-    await _safe_reply_text(update, help_text, parse_mode="Markdown")
+    await _safe_reply_text(update, help_text, parse_mode="Markdown", reply_markup=keyboard)
 
 
 async def countries(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1538,16 +1675,28 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("💰 Set Canva & Rewards" if _is_english(update) else "💰 Atur Canva & Reward Koin", callback_data="admin:prices")],
-            [InlineKeyboardButton("🏷️ Set Product Prices" if _is_english(update) else "🏷️ Atur Harga Produk Digital", callback_data="admin:product_prices")],
-            [InlineKeyboardButton("📜 Transaction History" if _is_english(update) else "📜 Histori Transaksi", callback_data="admin:tx_history")],
-            [InlineKeyboardButton("🎟️ Create Redeem Code" if _is_english(update) else "🎟️ Buat Redeem Code", callback_data="admin:redeem")],
-            [InlineKeyboardButton("➕ Grant User Coins" if _is_english(update) else "➕ Tambah Coin User", callback_data="admin:addcoins")],
-            [InlineKeyboardButton("📦 Set Product Stock" if _is_english(update) else "📦 Atur Stok Produk", callback_data="admin:stock")],
-            [InlineKeyboardButton("ℹ️ Set Product Info" if _is_english(update) else "ℹ️ Atur Info Produk", callback_data="admin:info")],
-            [InlineKeyboardButton("📢 Broadcast" if _is_english(update) else "📢 Kirim Pengumuman", callback_data="admin:broadcast")],
-            [InlineKeyboardButton("💳 Provider Balance" if _is_english(update) else "💳 Saldo Provider", callback_data="admin:provider_balance")],
-            [InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="menu:main")],
+            [
+                InlineKeyboardButton("💰 Canva & Rewards" if _is_english(update) else "💰 Canva & Reward", callback_data="admin:prices"),
+                InlineKeyboardButton("🏷️ Product Prices" if _is_english(update) else "🏷️ Harga Produk", callback_data="admin:product_prices"),
+            ],
+            [
+                InlineKeyboardButton("📜 Trans History" if _is_english(update) else "📜 Histori Transaksi", callback_data="admin:tx_history"),
+                InlineKeyboardButton("🎟️ Redeem Code" if _is_english(update) else "🎟️ Buat Redeem", callback_data="admin:redeem"),
+            ],
+            [
+                InlineKeyboardButton("➕ Grant Coins" if _is_english(update) else "➕ Tambah Koin", callback_data="admin:addcoins"),
+                InlineKeyboardButton("📦 Product Stock" if _is_english(update) else "📦 Stok Produk", callback_data="admin:stock"),
+            ],
+            [
+                InlineKeyboardButton("ℹ️ Product Info" if _is_english(update) else "ℹ️ Info Produk", callback_data="admin:info"),
+                InlineKeyboardButton("📢 Broadcast" if _is_english(update) else "📢 Broadcast", callback_data="admin:broadcast"),
+            ],
+            [
+                InlineKeyboardButton("💳 Provider Balance" if _is_english(update) else "💳 Saldo Provider", callback_data="admin:provider_balance"),
+            ],
+            [
+                InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="menu:main"),
+            ],
         ]
     )
     await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=keyboard)
@@ -2494,23 +2643,71 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         label = label_en if english else label_id
         context.user_data["broadcast_type"] = broadcast_type
         context.user_data["step"] = ADMIN_BROADCAST
+        tmpl_preview = _BROADCAST_TEMPLATES.get(broadcast_type, {}).get("en" if english else "id", "")
         if english:
             text = (
-                f"*{emoji} {label}*\n\n"
-                "Type the announcement message to send to all users.\n\n"
-                "_Tip: use \\*bold\\* for bold text, or add emojis for emphasis._\n\n"
-                "Your message will be sent with the category header above it."
+                f"*{emoji} {label} Broadcast*\n\n"
+                f"📋 *Preset Template:*\n"
+                f"────────────────────────\n"
+                f"{tmpl_preview}\n"
+                f"────────────────────────\n\n"
+                f"👉 Tap *🚀 Send This Template* below to broadcast this template immediately, "
+                f"or *type and send your own message* in chat to send custom content.\n\n"
+                f"_(Delivered cleanly without title headers)_"
             )
+            buttons = [
+                [InlineKeyboardButton("🚀 Send This Template", callback_data=f"admin:broadcast_send_tmpl:{broadcast_type}")],
+                [InlineKeyboardButton("⬅️ Back", callback_data="admin:broadcast")],
+            ]
         else:
             text = (
-                f"*{emoji} {label}*\n\n"
-                "Ketik isi pesan pengumuman yang akan dikirim ke semua pengguna.\n\n"
-                "_Tip: gunakan \\*teks\\* untuk *bold*, atau tambahkan emoji agar lebih menarik._\n\n"
-                "Pesan akan dikirim dengan header kategori di atasnya."
+                f"*{emoji} Broadcast {label}*\n\n"
+                f"📋 *Template Siap Pakai:*\n"
+                f"────────────────────────\n"
+                f"{tmpl_preview}\n"
+                f"────────────────────────\n\n"
+                f"👉 Klik *🚀 Kirim Template Ini* untuk langsung menyiarkan template di atas, "
+                f"atau *ketik langsung pesan Anda di chat* jika ingin mengirim teks sendiri.\n\n"
+                f"_(Pesan dikirim murni isinya tanpa tambahan judul kategori)_"
             )
+            buttons = [
+                [InlineKeyboardButton("🚀 Kirim Template Ini", callback_data=f"admin:broadcast_send_tmpl:{broadcast_type}")],
+                [InlineKeyboardButton("⬅️ Kembali", callback_data="admin:broadcast")],
+            ]
         await _safe_edit_text(
             update, text, parse_mode="Markdown",
-            reply_markup=_back_keyboard("admin:broadcast"),
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+        return
+
+    if data.startswith("admin:broadcast_send_tmpl:"):
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
+            return
+        broadcast_type = data.split(":", 2)[2]
+        if broadcast_type not in _BROADCAST_TYPES:
+            await _safe_edit_text(update, "Kategori tidak valid.", reply_markup=_back_keyboard("admin:broadcast"))
+            return
+        english = _is_english(update)
+        emoji, label_id, label_en = _BROADCAST_TYPES[broadcast_type]
+        label = label_en if english else label_id
+        await _safe_edit_text(
+            update,
+            f"⏳ Sending *{emoji} {label}* template broadcast\u2026 Please wait."
+            if english
+            else f"⏳ Mengirim broadcast template *{emoji} {label}*\u2026 Harap tunggu.",
+            parse_mode="Markdown",
+        )
+        sent = await _broadcast_announcement(context, broadcast_type, use_template=True)
+        context.user_data.pop("step", None)
+        context.user_data.pop("broadcast_type", None)
+        await _safe_edit_text(
+            update,
+            f"✅ Template broadcast sent to *{sent}* user(s)."
+            if english
+            else f"✅ Template broadcast berhasil dikirim ke *{sent}* pengguna.",
+            parse_mode="Markdown",
+            reply_markup=_back_keyboard("admin:menu"),
         )
         return
 
