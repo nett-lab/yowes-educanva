@@ -1064,12 +1064,22 @@ def get_country_display(code: str) -> str:
     return COUNTRY_LABELS.get(code.lower(), code.upper())
 
 
-def _safe_reply_text(update: Update, text: str, **kwargs):
-    if update.callback_query is not None:
-        return update.callback_query.message.reply_text(text, **kwargs)
-    if update.message is not None:
-        return update.message.reply_text(text, **kwargs)
-    return None
+async def _safe_reply_text(update: Update, text: str, **kwargs):
+    target = None
+    if update.callback_query is not None and update.callback_query.message is not None:
+        target = update.callback_query.message
+    elif update.message is not None:
+        target = update.message
+    if target is None:
+        return None
+    try:
+        return await target.reply_text(text, **kwargs)
+    except TelegramError as exc:
+        if "can't parse entities" in str(exc).lower():
+            safe_kwargs = dict(kwargs)
+            safe_kwargs.pop("parse_mode", None)
+            return await target.reply_text(text, **safe_kwargs)
+        raise
 
 
 async def _safe_edit_text(update: Update, text: str, **kwargs):
@@ -1469,39 +1479,40 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not await require_channel_membership(update, context):
         return
     english = _is_english(update)
+    contact_handle = SUPPORT_USERNAME
     if english:
         help_text = (
-            "*📖 Service & Feature Guide*\n\n"
-            "🎓 *Canva Doc Education:*\n"
+            "<b>📖 Service & Feature Guide</b>\n\n"
+            "🎓 <b>Canva Doc Education:</b>\n"
             "• Select country & document type from the main menu.\n"
             "• Fill in profile details and confirm.\n"
             "• Documents generated instantly using coins (🪙).\n\n"
-            "🛍️ *Digital Products:*\n"
+            "🛍️ <b>Digital Products:</b>\n"
             "• Available: Gemini Pro, CapCut Pro, Claude API, GPT Codex, Prime Video.\n"
-            "• Instant payment via *QRIS* (IDR) & *Binance Pay* (USDT).\n"
+            "• Instant payment via <b>QRIS</b> (IDR) & <b>Binance Pay</b> (USDT).\n"
             "• Automated delivery straight to your chat.\n\n"
-            "✨ *Other Menus & Rewards:*\n"
-            "• 🎁 *Daily Check-in:* Free bonus coins every 24 hours.\n"
-            "• 🤝 *Referral Program:* Earn extra coins by inviting friends.\n"
-            "• 🎟️ *Redeem Code:* Claim special promo voucher coins.\n"
-            "• 💬 *Customer Support:* Contact @TeamPr0_07 for assistance."
+            "✨ <b>Other Menus & Rewards:</b>\n"
+            "• 🎁 <b>Daily Check-in:</b> Free bonus coins every 24 hours.\n"
+            "• 🤝 <b>Referral Program:</b> Earn extra coins by inviting friends.\n"
+            "• 🎟️ <b>Redeem Code:</b> Claim special promo voucher coins.\n"
+            f"• 💬 <b>Customer Support:</b> Contact {contact_handle} for assistance."
         )
     else:
         help_text = (
-            "*📖 Panduan Layanan & Fitur*\n\n"
-            "🎓 *Canva Doc Education:*\n"
+            "<b>📖 Panduan Layanan & Fitur</b>\n\n"
+            "🎓 <b>Canva Doc Education:</b>\n"
             "• Pilih negara & tipe dokumen di menu utama.\n"
             "• Lengkapi data profil lalu konfirmasi.\n"
             "• Dokumen dibuat instan menggunakan koin (🪙).\n\n"
-            "🛍️ *Produk Digital:*\n"
+            "🛍️ <b>Produk Digital:</b>\n"
             "• Tersedia: Gemini Pro, CapCut Pro, Claude API, GPT Codex, Prime Video.\n"
-            "• Pembayaran otomatis via *QRIS* (Rupiah) & *Binance Pay* (USDT).\n"
+            "• Pembayaran otomatis via <b>QRIS</b> (Rupiah) & <b>Binance Pay</b> (USDT).\n"
             "• Akun/lisensi dikirim otomatis langsung ke chat bot.\n\n"
-            "✨ *Menu & Fitur Lainnya:*\n"
-            "• 🎁 *Check-in Harian:* Klaim koin gratis setiap hari.\n"
-            "• 🤝 *Program Referral:* Ajak teman dan dapatkan bonus koin.\n"
-            "• 🎟️ *Redeem Code:* Klaim kode voucher koin hadiah.\n"
-            "• 💬 *Bantuan Support:* Hubungi @TeamPr0_07 untuk bantuan."
+            "✨ <b>Menu & Fitur Lainnya:</b>\n"
+            "• 🎁 <b>Check-in Harian:</b> Klaim koin gratis setiap hari.\n"
+            "• 🤝 <b>Program Referral:</b> Ajak teman dan dapatkan bonus koin.\n"
+            "• 🎟️ <b>Redeem Code:</b> Klaim kode voucher koin hadiah.\n"
+            f"• 💬 <b>Bantuan Support:</b> Hubungi {contact_handle} untuk bantuan."
         )
     keyboard = InlineKeyboardMarkup(
         [
@@ -1511,7 +1522,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             ]
         ]
     )
-    await _safe_reply_text(update, help_text, parse_mode="Markdown", reply_markup=keyboard)
+    await _safe_reply_text(update, help_text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def countries(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
