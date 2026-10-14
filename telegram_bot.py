@@ -11,8 +11,9 @@ import sqlite3
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from telegram import (
     InlineKeyboardButton,
@@ -35,6 +36,28 @@ from countries import get_country, list_countries
 from mcp_server import generate_documents
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def _load_env_file() -> None:
+    env_file = BASE_DIR / ".env"
+    if not env_file.exists():
+        return
+    try:
+        with env_file.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip("'\"")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        pass
+
+
+_load_env_file()
 OUTPUT_DIR = BASE_DIR / "output" / "telegram"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR = BASE_DIR / "data"
@@ -48,6 +71,14 @@ MEDIA_RETENTION_SECONDS = 10 * 60
 MEDIA_CLEANUP_INTERVAL_SECONDS = 60
 _media_cleanup_task: asyncio.Task | None = None
 _prodseller_products_cache: tuple[float, list[dict]] = (0.0, [])
+
+import qris_engine
+import shopeepay_engine
+
+_shopee_qris_raw = os.getenv("SHOPEE_MERCHANT_QRIS_RAW", "").strip()
+_shopeepay_client = shopeepay_engine.ShopeePayClient()
+_amount_allocator = shopeepay_engine.UniqueAmountAllocator()
+_shopeepay_poller_task: asyncio.Task | None = None
 
 COUNTRY_LABELS = {
     "uk": "🇬🇧 United Kingdom",
@@ -92,22 +123,30 @@ async def _media_cleanup_loop() -> None:
 
 
 async def _start_media_cleanup(application) -> None:
-    global _media_cleanup_task
+    global _media_cleanup_task, _shopeepay_poller_task
     _delete_expired_media()
     _media_cleanup_task = asyncio.create_task(_media_cleanup_loop())
-    logger.info("Telegram API initialized; media cleanup is active")
+    _shopeepay_poller_task = asyncio.create_task(_shopeepay_mutation_poller(application))
+    logger.info("Telegram API initialized; media cleanup & ShopeePay poller are active")
 
 
 async def _stop_media_cleanup(application) -> None:
-    global _media_cleanup_task
-    if _media_cleanup_task is None:
-        return
-    _media_cleanup_task.cancel()
-    try:
-        await _media_cleanup_task
-    except asyncio.CancelledError:
-        pass
-    _media_cleanup_task = None
+    global _media_cleanup_task, _shopeepay_poller_task
+    if _media_cleanup_task is not None:
+        _media_cleanup_task.cancel()
+        try:
+            await _media_cleanup_task
+        except asyncio.CancelledError:
+            pass
+        _media_cleanup_task = None
+
+    if _shopeepay_poller_task is not None:
+        _shopeepay_poller_task.cancel()
+        try:
+            await _shopeepay_poller_task
+        except asyncio.CancelledError:
+            pass
+        _shopeepay_poller_task = None
 
 (
     COUNTRY,
@@ -444,6 +483,10 @@ def init_database() -> None:
             # product_key tracks which catalog product the payment is for.
             # DEFAULT 'gemini' ensures backward-compat with existing rows.
             ("product_key", "TEXT NOT NULL DEFAULT 'gemini'"),
+            ("raw_amount", "INTEGER DEFAULT 0"),
+            ("qris_payload", "TEXT DEFAULT ''"),
+            ("auto_settled", "INTEGER DEFAULT 0"),
+            ("delivered_data", "TEXT DEFAULT ''"),
         ):
             try:
                 connection.execute(f"ALTER TABLE payment_requests ADD COLUMN {column} {definition}")
@@ -794,6 +837,111 @@ async def _show_catalog_payment_methods(update: Update, context: ContextTypes.DE
     await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
 
 
+async def _show_dynamic_qris_instruction(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    product_key: str,
+    base_price: int,
+    product_label: str,
+    back_callback: str,
+) -> bool:
+    """Attempt to present dynamic QRIS with automatic payment tracking.
+
+    Returns True if dynamic QRIS was successfully presented, False to fallback to static QRIS.
+    """
+    if not _shopee_qris_raw:
+        return False
+
+    try:
+        unique_amount, unique_code = _amount_allocator.allocate(base_price)
+        dyn_payload = qris_engine.static_to_dynamic_qris(_shopee_qris_raw, unique_amount)
+        qr_url = qris_engine.get_qris_qr_image_url(dyn_payload, size=450)
+    except Exception as exc:
+        logger.warning("Could not construct dynamic QRIS for %s: %s, falling back to static", product_key, exc)
+        return False
+
+    user = _user_from_update(update)
+    email = context.user_data.get("product_email") or context.user_data.get("gemini_email")
+    english = _is_english(update)
+
+    with _db() as connection:
+        cursor = connection.execute(
+            "INSERT INTO payment_requests "
+            "(user_id, method, amount, reference, email, product_key, raw_amount, qris_payload, created_at) "
+            "VALUES (?, 'qris', ?, ?, ?, ?, ?, ?, ?)",
+            (
+                user["user_id"] if user else 0,
+                _format_idr(unique_amount),
+                f"QRIS-DYN-{unique_amount}",
+                email,
+                product_key,
+                unique_amount,
+                dyn_payload,
+                datetime.now().isoformat(),
+            ),
+        )
+        payment_id = cursor.lastrowid
+
+    context.user_data["current_qris_payment_id"] = payment_id
+
+    if english:
+        caption = (
+            f"<b>📱 Automatic QRIS Payment</b>\n\n"
+            f"Product: <b>{_safe_html(product_label)}</b>\n"
+            f"Total Amount: <b><code>Rp{unique_amount:,}</code></b>\n"
+            f"<i>(Includes unique code Rp{unique_code} for instant auto-verification)</i>\n\n"
+            f"⚠️ <b>IMPORTANT:</b>\n"
+            f"• Please transfer the <b>EXACT</b> amount above (do not round off).\n"
+            f"• Supported: BCA, Livin, Mandiri, BRI, ShopeePay, GoPay, OVO, DANA, etc.\n"
+            f"• Order is delivered automatically once payment is detected.\n\n"
+            f"⏱ Valid for: <b>15 minutes</b>"
+        ).replace(",", ".")
+    else:
+        caption = (
+            f"<b>📱 Pembayaran QRIS Otomatis</b>\n\n"
+            f"Produk: <b>{_safe_html(product_label)}</b>\n"
+            f"Total Bayar: <b><code>Rp{unique_amount:,}</code></b>\n"
+            f"<i>(Termasuk kode unik Rp{unique_code} untuk verifikasi otomatis instan)</i>\n\n"
+            f"⚠️ <b>PENTING:</b>\n"
+            f"• Mohon transfer <b>TEPAT</b> sesuai nominal di atas (jangan dibulatkan).\n"
+            f"• Mendukung semua Bank & E-Wallet (BCA, Livin, Mandiri, BRI, ShopeePay, GoPay, OVO, DANA, dll).\n"
+            f"• Pesanan akan otomatis terkirim segera setelah pembayaran terdeteksi.\n\n"
+            f"⏱ Batas Waktu: <b>15 menit</b>"
+        ).replace(",", ".")
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Check Payment Status" if english else "🔄 Cek Status Pembayaran", callback_data=f"qris_check:{payment_id}")],
+        [InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data=back_callback)],
+    ])
+
+    if update.effective_chat:
+        if update.callback_query and update.callback_query.message:
+            try:
+                await update.callback_query.message.delete()
+            except TelegramError:
+                pass
+        try:
+            sent_msg = await context.bot.send_photo(
+                chat_id=update.effective_chat.id,
+                photo=qr_url,
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+            if sent_msg:
+                with _db() as connection:
+                    connection.execute(
+                        "UPDATE payment_requests SET user_chat_id = ?, user_message_id = ? WHERE id = ?",
+                        (sent_msg.chat_id, sent_msg.message_id, payment_id),
+                    )
+            return True
+        except TelegramError as exc:
+            logger.warning("Failed to send dynamic QRIS photo for %s: %s, falling back to static", product_key, exc)
+            return False
+
+    return False
+
+
 async def _show_catalog_payment_instruction(
     update: Update, context: ContextTypes.DEFAULT_TYPE, key: str, method: str,
 ) -> None:
@@ -826,7 +974,19 @@ async def _show_catalog_payment_instruction(
         )
         await _safe_edit_text(update, text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(back_btn))
     else:
-        qris_price = _format_idr(_setting(cfg["price_qris_key"], cfg["default_qris_idr"]))
+        raw_price = _setting(cfg["price_qris_key"], cfg["default_qris_idr"])
+        label = f"{cfg['emoji']} {cfg['label_en'] if english else cfg['label_id']}"
+        if await _show_dynamic_qris_instruction(
+            update=update,
+            context=context,
+            product_key=key,
+            base_price=raw_price,
+            product_label=label,
+            back_callback=f"catalog_payment_methods:{key}",
+        ):
+            return
+
+        qris_price = _format_idr(raw_price)
         note       = os.getenv("QRIS_PAYMENT_NOTE", "").strip()
         text = (
             f"<b>📱 QRIS Payment</b>\n\nAmount: <b>{qris_price}</b>\n"
@@ -834,7 +994,7 @@ async def _show_catalog_payment_instruction(
             + ("After payment, send the transaction reference or screenshot." if english
                else "Setelah membayar, kirim referensi transaksi atau screenshot.")
         )
-        qris_path = Path(os.getenv("QRIS_IMAGE_PATH", "QRIS-SUKSES-BERSAMA.jpeg"))
+        qris_path = Path(os.getenv("QRIS_IMAGE_PATH", "QRIS-YOWES-DIGITAL-PRO.jpeg"))
         if not qris_path.is_absolute():
             qris_path = BASE_DIR / qris_path
         if qris_path.exists() and update.effective_chat:
@@ -1365,12 +1525,13 @@ def _main_menu_keyboard(update: Update) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(f"📺 Prime Video · {prime_price}", callback_data="product:primevideo")],
             [
                 InlineKeyboardButton("🪙 Coin Saya" if not english else "🪙 My Coins", callback_data="account:coins"),
-                InlineKeyboardButton("🤝 Referral", callback_data="referral:menu"),
+                InlineKeyboardButton("📦 Pesanan Saya" if not english else "📦 My Orders", callback_data="user:orders:0"),
             ],
             [
+                InlineKeyboardButton("🤝 Referral", callback_data="referral:menu"),
                 InlineKeyboardButton("🎁 Check-in Harian" if not english else "🎁 Daily Check-in", callback_data="checkin:daily"),
-                InlineKeyboardButton("🎟️ Redeem Code", callback_data="redeem:input"),
             ],
+            [InlineKeyboardButton("🎟️ Redeem Code", callback_data="redeem:input")],
             [InlineKeyboardButton("🌐 Bahasa / Language", callback_data="settings:language")],
             [InlineKeyboardButton("💬 Hubungi Support" if not english else "💬 Contact Support", url=SUPPORT_URL)],
             *([[InlineKeyboardButton("⚙️ Admin Settings", callback_data="admin:menu")]] if _is_admin(update.effective_user.id if update.effective_user else None) else []),
@@ -1431,8 +1592,8 @@ async def require_channel_membership(update: Update, context: ContextTypes.DEFAU
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edit: bool = False) -> None:
     _user_from_update(update)
     if edit and update.callback_query is not None:
-        await update.callback_query.edit_message_text(
-            _main_menu_text(update), parse_mode="Markdown", reply_markup=_main_menu_keyboard(update)
+        await _safe_edit_text(
+            update, _main_menu_text(update), parse_mode="Markdown", reply_markup=_main_menu_keyboard(update)
         )
     else:
         await _safe_reply_text(update, _main_menu_text(update), parse_mode="Markdown", reply_markup=_main_menu_keyboard(update))
@@ -1552,7 +1713,10 @@ async def show_coins(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("📜 Histori Koin" if not english else "📜 Coin History", callback_data="account:history")],
+            [
+                InlineKeyboardButton("📜 Histori Koin" if not english else "📜 Coin History", callback_data="account:history"),
+                InlineKeyboardButton("📦 Pesanan Saya" if not english else "📦 My Orders", callback_data="user:orders:0"),
+            ],
             [InlineKeyboardButton("⬅️ Kembali", callback_data="menu:main")],
         ]
     )
@@ -1576,6 +1740,110 @@ async def show_coin_history(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             lines.append(f"`{date}`  {sign}{item['amount']} 🪙  · {item['reason']}  · saldo {item['balance_after']}")
         text = f"{title}\n\n" + "\n".join(lines)
     await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=_back_keyboard("account:coins"))
+
+
+async def show_user_orders(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0) -> None:
+    """Display product order history including licenses, keys, and activation links."""
+    user = _user_from_update(update)
+    if not user:
+        return
+    english = user["language"] == "en"
+    page_size = 3
+    offset = max(0, page) * page_size
+
+    with _db() as connection:
+        total_count = connection.execute(
+            "SELECT COUNT(*) AS total FROM payment_requests WHERE user_id = ?",
+            (user["user_id"],),
+        ).fetchone()["total"]
+        orders = connection.execute(
+            "SELECT * FROM payment_requests WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+            (user["user_id"], page_size, offset),
+        ).fetchall()
+
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    current_page = max(0, min(page, total_pages - 1))
+
+    if not orders:
+        empty_text = (
+            "<b>📦 Order History</b>\n\n"
+            "You have no digital product purchase history yet.\n"
+            "Please select a product from the main menu to make an order."
+            if english else
+            "<b>📦 Riwayat Pesanan Produk</b>\n\n"
+            "Anda belum memiliki riwayat pembelian produk digital.\n"
+            "Silakan pilih produk pada menu utama untuk melakukan pemesanan."
+        )
+        await _safe_edit_text(update, empty_text, parse_mode="HTML", reply_markup=_back_keyboard("menu:main"))
+        return
+
+    header = (
+        f"<b>📦 Order History</b> (Page {current_page + 1}/{total_pages})\n\n"
+        f"Total Orders: <b>{total_count}</b>\n"
+        "────────────────────────\n"
+        if english else
+        f"<b>📦 Riwayat Pesanan Produk</b> (Halaman {current_page + 1}/{total_pages})\n\n"
+        f"Total Pesanan: <b>{total_count}</b>\n"
+        "────────────────────────\n"
+    )
+
+    blocks = []
+    for ord_row in orders:
+        pkey = ord_row["product_key"] if "product_key" in ord_row.keys() and ord_row["product_key"] else "gemini"
+        if pkey in _PRODUCT_CATALOG:
+            cfg = _PRODUCT_CATALOG[pkey]
+            prod_label = f"{cfg['emoji']} {cfg['label_en'] if english else cfg['label_id']}"
+        else:
+            prod_label = "✨ Gemini Pro"
+
+        status_raw = ord_row["status"]
+        if status_raw == "approved":
+            status_text = "✅ Approved / Delivered" if english else "✅ Sukses Terkirim"
+        elif status_raw == "pending":
+            status_text = "⏳ Pending Verification" if english else "⏳ Menunggu Verifikasi"
+        elif status_raw == "provider_failed":
+            status_text = "⚠️ Processing (Admin)" if english else "⚠️ Sedang Diproses Admin"
+        else:
+            status_text = "❌ Rejected" if english else "❌ Ditolak"
+
+        method_text = str(ord_row["method"]).upper()
+        amount_text = ord_row["amount"] or "-"
+        date_str = ord_row["created_at"].replace("T", " ")[:16]
+
+        provider_order_id = ord_row["provider_order_id"] or "-"
+        delivered = ord_row["delivered_data"] if "delivered_data" in ord_row.keys() and ord_row["delivered_data"] else ""
+
+        block = (
+            f"<b>{prod_label}</b>\n"
+            f"• Date: <code>{date_str}</code>\n"
+            f"• Method: <b>{method_text}</b> ({amount_text})\n"
+            f"• Status: <b>{status_text}</b>\n"
+            f"• Order ID: <code>{_safe_html(provider_order_id)}</code>\n"
+            + (f"• <b>Access / License:</b>\n<code>{_safe_html(delivered)}</code>\n" if delivered else "")
+        ) if english else (
+            f"<b>{prod_label}</b>\n"
+            f"• Tanggal: <code>{date_str}</code>\n"
+            f"• Metode: <b>{method_text}</b> ({amount_text})\n"
+            f"• Status: <b>{status_text}</b>\n"
+            f"• Order ID: <code>{_safe_html(provider_order_id)}</code>\n"
+            + (f"• <b>Akses / Lisensi:</b>\n<code>{_safe_html(delivered)}</code>\n" if delivered else "")
+        )
+        blocks.append(block)
+
+    full_text = header + "\n────────────────────────\n".join(blocks)
+
+    nav_buttons = []
+    if current_page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev" if english else "⬅️ Sebelumnya", callback_data=f"user:orders:{current_page - 1}"))
+    if current_page + 1 < total_pages:
+        nav_buttons.append(InlineKeyboardButton("Next ➡️" if english else "Berikutnya ➡️", callback_data=f"user:orders:{current_page + 1}"))
+
+    keyboard_rows = []
+    if nav_buttons:
+        keyboard_rows.append(nav_buttons)
+    keyboard_rows.append([InlineKeyboardButton("⬅️ Menu Utama", callback_data="menu:main")])
+
+    await _safe_edit_text(update, full_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard_rows))
 
 
 async def show_referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1962,15 +2230,27 @@ async def show_payment_instruction(update: Update, context: ContextTypes.DEFAULT
             else f"<b>Transfer Langsung Binance</b>\n\nJumlah: <b>{_safe_html(binance_price)} USDT</b>\nAkun Binance admin:\n<code>{_safe_html(account)}</code>{network_line}\n\nTransfer USDT langsung ke akun Binance admin ini, lalu kirim TXID/hash transaksi."
         )
     else:
+        raw_price = _setting("gemini_qris_price_idr", 20000)
+        label = "✨ Gemini Pro"
+        if await _show_dynamic_qris_instruction(
+            update=update,
+            context=context,
+            product_key="gemini",
+            base_price=raw_price,
+            product_label=label,
+            back_callback="gemini:payment_methods",
+        ):
+            return
+
         note = os.getenv("QRIS_PAYMENT_NOTE", "Scan QRIS and send the transaction reference or screenshot.").strip()
-        qris_price = _format_idr(_setting("gemini_qris_price_idr", 20000))
+        qris_price = _format_idr(raw_price)
         text = (
             f"<b>QRIS Payment</b>\n\nAmount: <b>{qris_price}</b>\n{_safe_html(note)}\n\nAfter payment, send the transaction reference or screenshot."
             if english
             else f"<b>Pembayaran QRIS</b>\n\nJumlah: <b>{qris_price}</b>\n{_safe_html(note)}\n\nSetelah membayar, kirim referensi transaksi atau screenshot."
         )
         qris_url = os.getenv("QRIS_IMAGE_URL", "").strip()
-        qris_path = Path(os.getenv("QRIS_IMAGE_PATH", "QRIS-SUKSES-BERSAMA.jpeg"))
+        qris_path = Path(os.getenv("QRIS_IMAGE_PATH", "QRIS-YOWES-DIGITAL-PRO.jpeg"))
         if not qris_path.is_absolute():
             qris_path = BASE_DIR / qris_path
         if qris_path.exists() and update.effective_chat and context.bot:
@@ -2068,7 +2348,7 @@ async def _create_payment_request(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def _update_user_payment_message(
-    context: ContextTypes.DEFAULT_TYPE,
+    context: ContextTypes.DEFAULT_TYPE | Any,
     payment: sqlite3.Row,
     text: str,
     reply_markup=None,
@@ -2076,6 +2356,17 @@ async def _update_user_payment_message(
     chat_id = payment["user_chat_id"]
     message_id = payment["user_message_id"]
     if chat_id and message_id:
+        try:
+            await context.bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption=text,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+            return
+        except TelegramError:
+            pass
         try:
             await context.bot.edit_message_text(
                 chat_id=chat_id,
@@ -2087,7 +2378,195 @@ async def _update_user_payment_message(
             return
         except TelegramError as exc:
             logger.info("Could not edit payment message %s: %s", payment["id"], exc)
-    await context.bot.send_message(chat_id=payment["user_id"], text=text, parse_mode="HTML", reply_markup=reply_markup)
+    try:
+        await context.bot.send_message(chat_id=payment["user_id"], text=text, parse_mode="HTML", reply_markup=reply_markup)
+    except TelegramError as exc:
+        logger.warning("Could not send payment delivery message to user %s: %s", payment["user_id"], exc)
+
+
+async def _fulfill_payment_request(context: ContextTypes.DEFAULT_TYPE | Any, payment_id: int) -> tuple[bool, str]:
+    """Execute product delivery for an approved/verified payment request."""
+    with _db() as connection:
+        payment = connection.execute("SELECT * FROM payment_requests WHERE id = ?", (payment_id,)).fetchone()
+        if not payment:
+            return False, "Payment not found"
+        if payment["status"] == "approved":
+            return True, "Already approved"
+
+        connection.execute(
+            "UPDATE payment_requests SET status = 'approved', reviewed_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), payment_id),
+        )
+
+    pkey = payment["product_key"] if "product_key" in payment.keys() else "gemini"
+    try:
+        if pkey in _PRODUCT_CATALOG:
+            product = await _find_catalog_product(pkey)
+            order = await _create_catalog_order(payment["user_id"], pkey, product, payment["email"], charge_coins=False)
+            cfg = _PRODUCT_CATALOG[pkey]
+            product_label = f"{cfg['emoji']} {cfg['label_en']}"
+        else:
+            product = await _find_gemini_product()
+            order = await _create_gemini_order(payment["user_id"], product, payment["email"], charge_coins=False)
+            product_label = "✨ Gemini Pro"
+
+        delivered = order.get("deliveredKey") or ", ".join(order.get("deliveredKeys", []))
+        with _db() as connection:
+            connection.execute(
+                "UPDATE payment_requests SET provider_order_id = ?, delivered_data = ? WHERE id = ?",
+                (order.get("orderId"), delivered, payment_id),
+            )
+        user_message = (
+            f"<b>✅ Pembayaran QRIS Terverifikasi!</b>\n\n"
+            f"Pesanan: <b>{product_label}</b>\n"
+            f"Order ID: <code>{_safe_html(order.get('orderId', '-'))}</code>\n"
+            + (f"Akses / Lisensi:\n<code>{_safe_html(delivered)}</code>" if delivered else f"Status: <b>{_safe_html(order.get('status', 'pending'))}</b>")
+        )
+        finish_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📦 Riwayat Pesanan", callback_data="user:orders:0")],
+            [InlineKeyboardButton("⬅️ Menu Utama", callback_data="menu:main")],
+        ])
+        await _update_user_payment_message(context, payment, user_message, finish_keyboard)
+        return True, "Success"
+    except ProdSellerError as exc:
+        with _db() as connection:
+            connection.execute("UPDATE payment_requests SET status = 'provider_failed' WHERE id = ?", (payment_id,))
+        err_msg = (
+            "<b>Pembayaran terverifikasi</b>\n\n"
+            "Namun pengiriman provider masih tertunda. Admin akan segera menindaklanjuti pesanan Anda."
+        )
+        await _update_user_payment_message(context, payment, err_msg, _back_keyboard("menu:main"))
+        return False, str(exc)
+
+
+async def _notify_admins_auto_paid(
+    context: ContextTypes.DEFAULT_TYPE | Any,
+    payment_id: int,
+    amount: int,
+) -> None:
+    """Notify all admins that a dynamic ShopeePay QRIS was automatically verified and settled."""
+    with _db() as connection:
+        payment = connection.execute(
+            "SELECT p.*, u.username FROM payment_requests p LEFT JOIN users u ON u.user_id = p.user_id WHERE p.id = ?",
+            (payment_id,),
+        ).fetchone()
+    if not payment:
+        return
+    pkey = payment["product_key"] if "product_key" in payment.keys() else "gemini"
+    if pkey in _PRODUCT_CATALOG:
+        cfg = _PRODUCT_CATALOG[pkey]
+        product_label = f"{cfg['emoji']} {cfg['label_en']}"
+    else:
+        product_label = "✨ Gemini Pro"
+
+    message = (
+        f"<b>⚡ Auto-Settled QRIS ShopeePay</b>\n\n"
+        f"ID: <code>#{payment_id}</code>\n"
+        f"Produk: <b>{product_label}</b>\n"
+        f"User: <code>{payment['user_id']}</code> @{_safe_html(payment['username'] or '-')}\n"
+        f"Nominal: <b>{_format_idr(amount)}</b>\n"
+        f"Status: <b>✅ Sukses Terverifikasi Otomatis</b>"
+    )
+    for admin_id in _admin_ids():
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=message, parse_mode="HTML")
+        except TelegramError as exc:
+            logger.info("Could not notify admin %s of auto payment: %s", admin_id, exc)
+
+
+async def _check_and_settle_qris_payment(
+    context: ContextTypes.DEFAULT_TYPE | Any,
+    payment_id: int,
+) -> tuple[bool, str]:
+    """Check ShopeePay mutations for a specific pending dynamic QRIS payment and fulfill if matched."""
+    with _db() as connection:
+        payment = connection.execute(
+            "SELECT * FROM payment_requests WHERE id = ?", (payment_id,)
+        ).fetchone()
+    if not payment:
+        return False, "Transaksi tidak ditemukan."
+    if payment["status"] == "approved":
+        return True, "Pembayaran sudah terverifikasi dan pesanan telah dikirim."
+
+    target_amount = payment["raw_amount"]
+    if not target_amount or target_amount <= 0:
+        return False, "Bukan pembayaran QRIS dinamis otomatis."
+
+    try:
+        recent_txs = await _shopeepay_client.fetch_recent_transactions(1800)
+    except Exception as exc:
+        logger.warning("Error fetching ShopeePay transactions: %s", exc)
+        return False, f"Gagal mengecek mutasi: {exc}"
+
+    matched = False
+    for tx in recent_txs:
+        tx_amount = shopeepay_engine.parse_shopee_amount(tx.get("amount", 0))
+        tx_status = tx.get("status")
+        # Status 3 represents COMPLETED_STATUS
+        if tx_amount == target_amount and tx_status in (3, "3", "SUCCESS", "COMPLETED"):
+            matched = True
+            break
+
+    if not matched:
+        return False, f"Pembayaran {_format_idr(target_amount)} belum terdeteksi di mutasi ShopeePay. Pastikan Anda telah mentransfer nominal persis dan tunggu 10-30 detik."
+
+    ok, fulfill_msg = await _fulfill_payment_request(context, payment_id)
+    if ok:
+        with _db() as connection:
+            connection.execute("UPDATE payment_requests SET auto_settled = 1 WHERE id = ?", (payment_id,))
+        _amount_allocator.release(target_amount)
+        await _notify_admins_auto_paid(context, payment_id, target_amount)
+        return True, "Sukses"
+    return False, fulfill_msg
+
+
+async def _shopeepay_mutation_poller(application) -> None:
+    """Background polling loop that checks ShopeePay mutations every 8-10 seconds for pending QRIS."""
+    logger.info("ShopeePay mutation poller started (dynamic QRIS background check)")
+    while True:
+        try:
+            await asyncio.sleep(8)
+            _amount_allocator.cleanup()
+
+            cutoff = (datetime.now() - timedelta(minutes=20)).isoformat()
+            with _db() as connection:
+                pending_payments = connection.execute(
+                    "SELECT * FROM payment_requests WHERE method = 'qris' AND status = 'pending' AND raw_amount > 0 AND created_at >= ?",
+                    (cutoff,),
+                ).fetchall()
+
+            if not pending_payments:
+                continue
+
+            recent_txs = await _shopeepay_client.fetch_recent_transactions(1800)
+            if not recent_txs:
+                continue
+
+            for payment in pending_payments:
+                p_id = payment["id"]
+                target_amount = payment["raw_amount"]
+                matched = False
+                for tx in recent_txs:
+                    tx_amount = shopeepay_engine.parse_shopee_amount(tx.get("amount", 0))
+                    tx_status = tx.get("status")
+                    if tx_amount == target_amount and tx_status in (3, "3", "SUCCESS", "COMPLETED"):
+                        matched = True
+                        break
+
+                if matched:
+                    logger.info("ShopeePay poller matched payment #%s for amount %s", p_id, target_amount)
+                    ok, _ = await _fulfill_payment_request(application, p_id)
+                    if ok:
+                        with _db() as connection:
+                            connection.execute("UPDATE payment_requests SET auto_settled = 1 WHERE id = ?", (p_id,))
+                        _amount_allocator.release(target_amount)
+                        await _notify_admins_auto_paid(application, p_id, target_amount)
+
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.warning("ShopeePay poller iteration exception: %s", exc)
+            await asyncio.sleep(5)
 
 
 async def _review_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, payment_id: int, approved: bool) -> None:
@@ -2100,12 +2579,11 @@ async def _review_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
         if not payment or payment["status"] != "pending":
             await _safe_edit_text(update, "Payment is already reviewed or not found.", reply_markup=_back_keyboard("admin:menu"))
             return
-        new_status = "approved" if approved else "rejected"
-        connection.execute(
-            "UPDATE payment_requests SET status = ?, reviewed_at = ?, reviewed_by = ? WHERE id = ? AND status = 'pending'",
-            (new_status, datetime.now().isoformat(), admin.id, payment_id),
-        )
-    # Determine which product this payment is for
+        if not approved:
+            connection.execute(
+                "UPDATE payment_requests SET status = 'rejected', reviewed_at = ?, reviewed_by = ? WHERE id = ? AND status = 'pending'",
+                (datetime.now().isoformat(), admin.id, payment_id),
+            )
     pkey = payment["product_key"] if "product_key" in payment.keys() else "gemini"
     back_product = f"product:{pkey}" if pkey in _PRODUCT_CATALOG else "product:gemini"
     if not approved:
@@ -2118,37 +2596,12 @@ async def _review_payment(update: Update, context: ContextTypes.DEFAULT_TYPE, pa
         )
         await _safe_edit_text(update, f"Payment #{payment_id} rejected.", reply_markup=_back_keyboard("admin:menu"))
         return
-    try:
-        # Route fulfillment to the correct ProdSeller product
-        if pkey in _PRODUCT_CATALOG:
-            product = await _find_catalog_product(pkey)
-            order   = await _create_catalog_order(payment["user_id"], pkey, product, payment["email"], charge_coins=False)
-            cfg = _PRODUCT_CATALOG[pkey]
-            product_label = f"{cfg['emoji']} {cfg['label_en']}"
-        else:
-            product = await _find_gemini_product()
-            order   = await _create_gemini_order(payment["user_id"], product, payment["email"], charge_coins=False)
-            product_label = "✨ Gemini Pro"
-        with _db() as connection:
-            connection.execute("UPDATE payment_requests SET provider_order_id = ? WHERE id = ?", (order.get("orderId"), payment_id))
-        delivered = order.get("deliveredKey") or ", ".join(order.get("deliveredKeys", []))
-        user_message = (
-            f"<b>Payment verified</b>\n\n{product_label} order: <code>{_safe_html(order.get('orderId', '-'))}</code>\n"
-            + (f"Link/key: <code>{_safe_html(delivered)}</code>" if delivered else f"Status: <b>{_safe_html(order.get('status', 'pending'))}</b>")
-        )
-        await _update_user_payment_message(context, payment, user_message, _back_keyboard("menu:main"))
+
+    ok, reason = await _fulfill_payment_request(context, payment_id)
+    if ok:
         await _safe_edit_text(update, f"Payment #{payment_id} verified and fulfilled.", reply_markup=_back_keyboard("admin:menu"))
-    except ProdSellerError as exc:
-        with _db() as connection:
-            connection.execute("UPDATE payment_requests SET status = 'provider_failed' WHERE id = ?", (payment_id,))
-        await _update_user_payment_message(
-            context, payment,
-            "<b>Payment verified</b>\n\nProvider fulfillment is pending. Admin will follow up."
-            if _is_english(update)
-            else "<b>Pembayaran terverifikasi</b>\n\nPengiriman provider masih tertunda. Admin akan menindaklanjuti.",
-            _back_keyboard("menu:main"),
-        )
-        await _safe_edit_text(update, f"Payment verified, provider fulfillment failed: {exc}", reply_markup=_back_keyboard("admin:menu"))
+    else:
+        await _safe_edit_text(update, f"Payment verified, provider fulfillment pending: {reason}", reply_markup=_back_keyboard("admin:menu"))
 async def _complete_gemini_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE, email: str | None = None) -> None:
     english = _is_english(update)
     message = (
@@ -2300,6 +2753,40 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         parts = data.split(":")
         if len(parts) == 3 and parts[1] in {"approve", "reject"} and parts[2].isdigit():
             await _review_payment(update, context, int(parts[2]), parts[1] == "approve")
+        return
+
+    if data.startswith("qris_check:"):
+        payment_id_str = data.split(":", 1)[1]
+        if payment_id_str.isdigit():
+            payment_id = int(payment_id_str)
+            english = _is_english(update)
+            if query:
+                try:
+                    await query.answer(
+                        "🔍 Checking ShopeePay mutation..." if english else "🔍 Memeriksa mutasi ShopeePay...",
+                        show_alert=False,
+                    )
+                except TelegramError:
+                    pass
+            success, message = await _check_and_settle_qris_payment(context, payment_id)
+            if success:
+                if query:
+                    try:
+                        await query.answer(
+                            "✅ Payment verified! Your order has been delivered." if english else "✅ Pembayaran terverifikasi! Pesanan Anda telah dikirim.",
+                            show_alert=True,
+                        )
+                    except TelegramError:
+                        pass
+            else:
+                if query:
+                    try:
+                        await query.answer(
+                            f"⏳ {message}",
+                            show_alert=True,
+                        )
+                    except TelegramError:
+                        pass
         return
 
     if data == "gemini:legacy_buy":
@@ -2737,9 +3224,15 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
         await help_command(update, context)
         return
 
-    if data == "menu:home":
+    if data in {"menu:home", "menu:main"}:
         context.user_data.clear()
         await show_main_menu(update, context, edit=True)
+        return
+
+    if data == "user:orders" or data.startswith("user:orders:"):
+        parts = data.split(":")
+        page = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+        await show_user_orders(update, context, page=page)
         return
 
     if data == "action:randomize":

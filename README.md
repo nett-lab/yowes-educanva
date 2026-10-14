@@ -293,7 +293,7 @@ PRODSELLER_BASE_URL=https://prodseller.com/v1
 BINANCE_PAYMENT_ADDRESS=your_binance_payment_address
 BINANCE_NETWORK=USDT network name
 QRIS_IMAGE_URL=https://your-qris-image-url
-QRIS_IMAGE_PATH=QRIS-SUKSES-BERSAMA.jpeg
+QRIS_IMAGE_PATH=QRIS-YOWES-DIGITAL-PRO.jpeg
 QRIS_PAYMENT_NOTE=QRIS payment instructions
 ```
 
