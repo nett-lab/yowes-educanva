@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 from html import escape
 import logging
@@ -619,6 +620,64 @@ _PRODUCT_CATALOG: dict[str, dict] = {
         "info_key": "primevideo_info",
         "default_info_id": "• Langganan Amazon Prime Video Premium\n• Streaming film & series eksklusif Amazon Originals\n• Kualitas video hingga 4K UHD & HDR\n• Support Smartphone, Tablet, PC & Smart TV",
         "default_info_en": "• Amazon Prime Video Premium Subscription\n• Stream exclusive movies & Amazon Originals\n• Video quality up to 4K UHD & HDR\n• Supports Smartphones, Tablets, PC & Smart TV",
+    },
+    "chatgpt_k12": {
+        "emoji": "🧠",
+        "label_id": "ChatGPT Plus K12 2Y",
+        "label_en": "ChatGPT Plus K12 2Y",
+        "price_coins_key": "chatgpt_k12_price",
+        "price_idr_key": "chatgpt_k12_price_idr",
+        "price_qris_key": "chatgpt_k12_qris_price_idr",
+        "price_binance_key": "chatgpt_k12_binance_price_usdt",
+        "default_coins": 90,
+        "default_idr": 55000,
+        "default_qris_idr": 55000,
+        "default_binance_usdt": "3.40",
+        "markup_usdt": 0.5,
+        "prodseller_default_id": "6a495a5f02999800df961920",
+        "prodseller_id_env": "PRODSELLER_CHATGPT_K12_ID",
+        "prodseller_name_env": "PRODSELLER_CHATGPT_K12_NAME",
+        "prodseller_default": "ChatGPT Plus K12 Edu 2 years",
+        "stock_key": "chatgpt_k12_manual_stock",
+        "info_key": "chatgpt_k12_info",
+        "default_info_id": (
+            "Features:\n"
+            "- Unlimited messages with GPT-6 Astra\n"
+            "- Work Feature available\n"
+            "- Web Search & Deep Research\n"
+            "- File uploads, File Search & connected apps\n"
+            "- Voice Mode & Image Generation & Codex\n"
+            "- Advanced Data Analysis & structured-data tools\n"
+            "- Memory for personalized assistance\n"
+            "- Custom GPTs & Shared Projects\n"
+            "- Collaboration tools for teachers & schools\n"
+            "- Education-grade privacy, security & compliance\n"
+            "- SSO, RBAC, domain controls & admin analytics\n\n"
+            "Delivery Format: 🚀\n"
+            "Email | Pass | 2FA | MailBox Link | Guide on How to activate/join K12 workspace\n\n"
+            "Get 2FA code: https://2fa.live/\n"
+            "Plan duration: 2 years (Warranty: 24 Hours)\n\n"
+            "⚠️ Note: Login to browser first before using it on the app."
+        ),
+        "default_info_en": (
+            "Features:\n"
+            "- Unlimited messages with GPT-6 Astra\n"
+            "- Work Feature available\n"
+            "- Web Search & Deep Research\n"
+            "- File uploads, File Search & connected apps\n"
+            "- Voice Mode & Image Generation & Codex\n"
+            "- Advanced Data Analysis & structured-data tools\n"
+            "- Memory for personalized assistance\n"
+            "- Custom GPTs & Shared Projects\n"
+            "- Collaboration tools for teachers & schools\n"
+            "- Education-grade privacy, security & compliance\n"
+            "- SSO, RBAC, domain controls & admin analytics\n\n"
+            "Delivery Format: 🚀\n"
+            "Email | Pass | 2FA | MailBox Link | Guide on How to activate/join K12 workspace\n\n"
+            "Get 2FA code: https://2fa.live/\n"
+            "Plan duration: 2 years (Warranty: 24 Hours)\n\n"
+            "⚠️ Note: Login to browser first before using it on the app."
+        ),
     },
 }
 
@@ -2769,66 +2828,243 @@ async def _update_user_payment_message(
         logger.warning("Could not send payment delivery message to user %s: %s", payment["user_id"], exc)
 
 
+def _extract_order_delivery(order: dict) -> tuple[str, str | None]:
+    """Extract delivered credentials/access text and optional file/download URL from an order payload."""
+    delivered_parts: list[str] = []
+    file_url: str | None = None
+
+    for fk in ("fileUrl", "file_url", "downloadUrl", "download_url", "file", "attachmentUrl"):
+        val = order.get(fk)
+        if isinstance(val, str) and (val.startswith("http://") or val.startswith("https://")):
+            file_url = val
+            break
+
+    dkey = order.get("deliveredKey")
+    if dkey:
+        if isinstance(dkey, str) and dkey.strip():
+            delivered_parts.append(dkey.strip())
+        elif isinstance(dkey, list):
+            delivered_parts.extend([str(k).strip() for k in dkey if str(k).strip()])
+        elif isinstance(dkey, dict):
+            for k, v in dkey.items():
+                delivered_parts.append(f"{k}: {v}")
+
+    dkeys = order.get("deliveredKeys")
+    if isinstance(dkeys, list):
+        for k in dkeys:
+            if isinstance(k, str) and k.strip() and k.strip() not in delivered_parts:
+                delivered_parts.append(k.strip())
+            elif isinstance(k, dict):
+                formatted = "\n".join(f"{dk}: {dv}" for dk, dv in k.items())
+                if formatted not in delivered_parts:
+                    delivered_parts.append(formatted)
+
+    raw_keys = order.get("keys")
+    if isinstance(raw_keys, list):
+        for k in raw_keys:
+            if isinstance(k, str) and k.strip() and k.strip() not in delivered_parts:
+                delivered_parts.append(k.strip())
+
+    for field in ("account", "credentials", "license", "licenseKey", "data", "deliveredData"):
+        val = order.get(field)
+        if not val:
+            continue
+        if isinstance(val, str) and val.strip() and val.strip() not in delivered_parts:
+            if (val.startswith("http://") or val.startswith("https://")) and any(val.lower().endswith(ext) for ext in (".txt", ".pdf", ".zip", ".json")):
+                if not file_url:
+                    file_url = val
+            delivered_parts.append(val.strip())
+        elif isinstance(val, dict):
+            formatted = "\n".join(f"{k}: {v}" for k, v in val.items())
+            if formatted not in delivered_parts:
+                delivered_parts.append(formatted)
+        elif isinstance(val, list):
+            for item in val:
+                s = str(item).strip()
+                if s and s not in delivered_parts:
+                    delivered_parts.append(s)
+
+    delivered_text = "\n".join(delivered_parts).strip()
+    return delivered_text, file_url
+
+
 async def _fulfill_payment_request(context: ContextTypes.DEFAULT_TYPE | Any, payment_id: int) -> tuple[bool, str]:
     """Execute product delivery for an approved/verified payment request."""
+    bot = getattr(context, "bot", context)
     with _db() as connection:
-        payment = connection.execute("SELECT * FROM payment_requests WHERE id = ?", (payment_id,)).fetchone()
-        if not payment:
+        row = connection.execute("SELECT * FROM payment_requests WHERE id = ?", (payment_id,)).fetchone()
+        if not row:
             return False, "Payment not found"
-        if payment["status"] == "approved":
+        payment = dict(row)
+        # If already approved AND already has delivered credentials, prevent duplicate charges/orders
+        if payment.get("status") == "approved" and payment.get("delivered_data"):
             return True, "Already approved"
 
-        connection.execute(
-            "UPDATE payment_requests SET status = 'approved', reviewed_at = ? WHERE id = ?",
-            (datetime.now().isoformat(), payment_id),
-        )
+    pkey = payment.get("product_key") or "gemini"
+    user_id = payment["user_id"]
+    delivered = ""
+    file_url = None
+    order: dict = {}
+    provider_order_id = ""
 
-    pkey = payment["product_key"] if "product_key" in payment.keys() else "gemini"
     try:
         if pkey in _PRODUCT_CATALOG:
-            product = await _find_catalog_product(pkey)
-            order = await _create_catalog_order(payment["user_id"], pkey, product, payment["email"], charge_coins=False)
             cfg = _PRODUCT_CATALOG[pkey]
             product_label = f"{cfg['emoji']} {cfg['label_en']}"
+            product = await _find_catalog_product(pkey)
+            order = await _create_catalog_order(user_id, pkey, product, payment.get("email"), charge_coins=False)
+            delivered, file_url = _extract_order_delivery(order)
+            provider_order_id = str(order.get("orderId") or f"ORD-{payment_id}")
         else:
-            if not _prodseller_configured():
+            product_label = "✨ Gemini Pro"
+            order_fulfilled = False
+
+            # 1. Try ProdSeller if configured and inStock
+            if _prodseller_configured():
+                try:
+                    product = await _find_gemini_product()
+                    if product.get("inStock") is not False:
+                        order = await _create_gemini_order(user_id, product, payment.get("email"), charge_coins=False)
+                        delivered, file_url = _extract_order_delivery(order)
+                        if delivered:
+                            order_fulfilled = True
+                            provider_order_id = str(order.get("orderId") or f"GEMINI-{payment_id}")
+                except Exception as exc:
+                    logger.warning("ProdSeller Gemini order attempt failed: %s; falling back to local stock", exc)
+
+            # 2. Seamless fallback to local gemini_stock in SQLite
+            if not order_fulfilled:
                 with _db() as connection:
-                    row = connection.execute("SELECT id, link, description FROM gemini_stock WHERE active = 1 ORDER BY id ASC LIMIT 1").fetchone()
+                    row = connection.execute(
+                        "SELECT id, link, description FROM gemini_stock WHERE active = 1 ORDER BY id ASC LIMIT 1"
+                    ).fetchone()
                     if row:
                         connection.execute("UPDATE gemini_stock SET active = 0 WHERE id = ?", (row["id"],))
-                        delivered = row["link"]
+                        delivered = str(row["link"] or "").strip()
+                        provider_order_id = f"LOCAL-GEMINI-{payment_id}-{row['id']}"
+                        order = {
+                            "orderId": provider_order_id,
+                            "status": "completed",
+                            "deliveredKey": delivered,
+                        }
+                        order_fulfilled = True
                     else:
-                        delivered = ""
-                order = {"orderId": f"MANUAL-{payment_id}", "status": "completed", "deliveredKey": delivered}
-                product_label = "✨ Gemini Pro"
-            else:
-                product = await _find_gemini_product()
-                order = await _create_gemini_order(payment["user_id"], product, payment["email"], charge_coins=False)
-                product_label = "✨ Gemini Pro"
-                delivered = order.get("deliveredKey") or ", ".join(order.get("deliveredKeys", []))
+                        provider_order_id = f"MANUAL-{payment_id}"
+                        order = {"orderId": provider_order_id, "status": "pending_stock"}
+
+            if not delivered and not order_fulfilled:
+                raise ProdSellerError("Semua stok Gemini Pro (online & lokal) sedang kosong. Admin akan segera memproses.")
+
+        # Save fulfilled delivery to database
         with _db() as connection:
             connection.execute(
-                "UPDATE payment_requests SET provider_order_id = ?, delivered_data = ? WHERE id = ?",
-                (order.get("orderId"), delivered, payment_id),
+                """
+                UPDATE payment_requests
+                SET status = 'approved',
+                    provider_order_id = ?,
+                    delivered_data = ?,
+                    reviewed_at = ?
+                WHERE id = ?
+                """,
+                (provider_order_id, delivered, datetime.now().isoformat(), payment_id),
             )
-        user_message = (
-            f"<b>✅ Pembayaran QRIS Terverifikasi!</b>\n\n"
-            f"Pesanan: <b>{product_label}</b>\n"
-            f"Order ID: <code>{_safe_html(order.get('orderId', '-'))}</code>\n"
-            + (f"Akses / Lisensi:\n<code>{_safe_html(delivered)}</code>" if delivered else f"Status: <b>{_safe_html(order.get('status', 'pending'))}</b>")
-        )
+
         finish_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📦 Riwayat Pesanan", callback_data="user:orders:0")],
             [InlineKeyboardButton("⬅️ Menu Utama", callback_data="menu:main")],
         ])
-        await _update_user_payment_message(context, payment, user_message, finish_keyboard)
+
+        # Step A: Update payment banner concisely (under 1024 chars, safe for photo caption)
+        qris_caption = (
+            f"<b>✅ Pembayaran QRIS Berhasil Diverifikasi!</b>\n\n"
+            f"Pesanan: <b>{product_label}</b>\n"
+            f"Order ID: <code>{_safe_html(provider_order_id)}</code>\n"
+            f"Status: <b>✅ Sukses Terkirim</b>\n\n"
+            f"<i>👇 Detail akun & file lisensi pesanan Anda telah dikirimkan di bawah ini.</i>"
+        )
+        await _update_user_payment_message(context, payment, qris_caption, finish_keyboard)
+
+        # Step B: Send dedicated copyable credential message to buyer
+        if delivered:
+            delivery_msg = (
+                f"<b>🎉 Pesanan Anda Berhasil Dikirim!</b>\n\n"
+                f"📦 Produk: <b>{product_label}</b>\n"
+                f"🆔 Order ID: <code>{_safe_html(provider_order_id)}</code>\n"
+                f"────────────────────────\n"
+                f"🔑 <b>Data Akun / Akses Lisensi:</b>\n"
+                f"<code>{_safe_html(delivered)}</code>\n"
+                f"────────────────────────\n"
+                f"💡 <i>Tip: Tap / klik pada kotak teks di atas untuk menyalin akun / lisensi secara instan.</i>\n\n"
+                f"📄 <i>File data akun (.txt) juga kami lampirkan di bawah ini untuk backup Anda.</i>"
+            )
+            try:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=delivery_msg,
+                    parse_mode="HTML",
+                )
+            except TelegramError as exc:
+                logger.warning("Could not send delivery text message to %s: %s", user_id, exc)
+
+            # Step C: Send .txt document attachment with credentials
+            safe_slug = re.sub(r"[^A-Za-z0-9_-]", "_", pkey).strip("_")
+            filename = f"{safe_slug}_order_{payment_id}.txt"
+            file_body = (
+                f"====================================================\n"
+                f"       YOWES DIGITAL PRO - ORDER DELIVERY DATA      \n"
+                f"====================================================\n"
+                f"Product  : {product_label}\n"
+                f"Order ID : {provider_order_id}\n"
+                f"Payment  : #{payment_id} ({payment.get('amount', '-')})\n"
+                f"Date     : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"====================================================\n\n"
+                f"ACCOUNT / ACCESS / LICENSE DETAILS:\n"
+                f"----------------------------------------------------\n"
+                f"{delivered}\n"
+                f"----------------------------------------------------\n\n"
+                f"IMPORTANT NOTES:\n"
+                f"1. Simpan data ini baik-baik dan jangan bagikan kepada siapapun.\n"
+                f"2. Jika membutuhkan bantuan atau kendala garansi, hubungi:\n"
+                f"   Telegram: {SUPPORT_USERNAME} ({SUPPORT_URL})\n"
+                f"====================================================\n"
+            )
+            try:
+                bio = io.BytesIO(file_body.encode("utf-8"))
+                bio.name = filename
+                await bot.send_document(
+                    chat_id=user_id,
+                    document=bio,
+                    filename=filename,
+                    caption=f"📄 <b>File Lisensi & Akun</b> — {product_label}\nSimpan file ini sebagai arsip pesanan Anda.",
+                    parse_mode="HTML",
+                )
+            except TelegramError as exc:
+                logger.warning("Could not send delivery txt document to %s: %s", user_id, exc)
+
+            # Step D: If provider returned an external file/guide URL, deliver it too!
+            if file_url:
+                try:
+                    download_kb = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("⬇️ Unduh File / Dokumen", url=file_url)]
+                    ])
+                    await bot.send_message(
+                        chat_id=user_id,
+                        text=f"📁 <b>File Tambahan / Panduan Pesanan</b>\n\nProvider menyertakan file unduhan untuk produk ini:\n<code>{_safe_html(file_url)}</code>",
+                        parse_mode="HTML",
+                        reply_markup=download_kb,
+                    )
+                except TelegramError as exc:
+                    logger.warning("Could not send attached file info to %s: %s", user_id, exc)
+
         return True, "Success"
-    except ProdSellerError as exc:
+
+    except (ProdSellerError, Exception) as exc:
+        logger.error("Error fulfilling payment #%s for product %s: %s", payment_id, pkey, exc)
         with _db() as connection:
             connection.execute("UPDATE payment_requests SET status = 'provider_failed' WHERE id = ?", (payment_id,))
         err_msg = (
             "<b>Pembayaran terverifikasi</b>\n\n"
-            "Namun pengiriman provider masih tertunda. Admin akan segera menindaklanjuti pesanan Anda."
+            "Namun pengiriman produk sedang diproses secara manual oleh admin. Kami akan segera menghubungi atau mengirimkannya."
         )
         await _update_user_payment_message(context, payment, err_msg, _back_keyboard("menu:main"))
         return False, str(exc)
