@@ -1001,6 +1001,7 @@ def init_database() -> None:
             ("auto_settled", "INTEGER DEFAULT 0"),
             ("delivered_data", "TEXT DEFAULT ''"),
             ("shopee_tx_id", "TEXT DEFAULT NULL"),
+            ("order_token", "TEXT DEFAULT ''"),
         ):
             try:
                 connection.execute(f"ALTER TABLE payment_requests ADD COLUMN {column} {definition}")
@@ -3200,17 +3201,18 @@ async def _fulfill_payment_request(context: ContextTypes.DEFAULT_TYPE | Any, pay
         ])
 
         # Step A: Update payment banner concisely (under 1024 chars, safe for photo caption)
-        qris_caption = (
-            f"<b>✅ Pembayaran QRIS Berhasil Diverifikasi!</b>\n\n"
-            f"Pesanan: <b>{product_label}</b>\n"
-            f"Order ID: <code>{_safe_html(provider_order_id)}</code>\n"
-            f"Status: <b>✅ Sukses Terkirim</b>\n\n"
-            f"<i>👇 Detail akun & file lisensi pesanan Anda telah dikirimkan di bawah ini.</i>"
-        )
-        await _update_user_payment_message(context, payment, qris_caption, finish_keyboard)
+        if user_id != 0:
+            qris_caption = (
+                f"<b>✅ Pembayaran QRIS Berhasil Diverifikasi!</b>\n\n"
+                f"Pesanan: <b>{product_label}</b>\n"
+                f"Order ID: <code>{_safe_html(provider_order_id)}</code>\n"
+                f"Status: <b>✅ Sukses Terkirim</b>\n\n"
+                f"<i>👇 Detail akun & file lisensi pesanan Anda telah dikirimkan di bawah ini.</i>"
+            )
+            await _update_user_payment_message(context, payment, qris_caption, finish_keyboard)
 
         # Step B: Send dedicated copyable credential message to buyer
-        if delivered:
+        if delivered and user_id != 0:
             delivery_msg = (
                 f"<b>🎉 Pesanan Anda Berhasil Dikirim!</b>\n\n"
                 f"📦 Produk: <b>{product_label}</b>\n"
@@ -3287,11 +3289,12 @@ async def _fulfill_payment_request(context: ContextTypes.DEFAULT_TYPE | Any, pay
         logger.error("Error fulfilling payment #%s for product %s: %s", payment_id, pkey, exc)
         with _db() as connection:
             connection.execute("UPDATE payment_requests SET status = 'provider_failed' WHERE id = ?", (payment_id,))
-        err_msg = (
-            "<b>Pembayaran terverifikasi</b>\n\n"
-            "Namun pengiriman produk sedang diproses secara manual oleh admin. Kami akan segera menghubungi atau mengirimkannya."
-        )
-        await _update_user_payment_message(context, payment, err_msg, _back_keyboard("menu:main"))
+        if user_id != 0:
+            err_msg = (
+                "<b>Pembayaran terverifikasi</b>\n\n"
+                "Namun pengiriman produk sedang diproses secara manual oleh admin. Kami akan segera menghubungi atau mengirimkannya."
+            )
+            await _update_user_payment_message(context, payment, err_msg, _back_keyboard("menu:main"))
         return False, str(exc)
 
 
@@ -3315,11 +3318,17 @@ async def _notify_admins_auto_paid(
     else:
         product_label = "✨ Gemini Pro"
 
+    user_str = (
+        f"<code>{payment['user_id']}</code> @{_safe_html(payment['username'] or '-')}"
+        if payment["user_id"] != 0
+        else f"🌐 Pembeli Web Store ({_safe_html(payment.get('email') or 'Tanpa Kontak')})"
+    )
+
     message = (
         f"<b>⚡ Auto-Settled QRIS ShopeePay</b>\n\n"
         f"ID: <code>#{payment_id}</code>\n"
         f"Produk: <b>{product_label}</b>\n"
-        f"User: <code>{payment['user_id']}</code> @{_safe_html(payment['username'] or '-')}\n"
+        f"User: {user_str}\n"
         f"Nominal: <b>{_format_idr(amount)}</b>\n"
         f"Status: <b>✅ Sukses Terverifikasi Otomatis</b>"
     )
@@ -3493,6 +3502,19 @@ async def _check_and_settle_qris_payment(
     return False, fulfill_msg
 
 
+def _check_and_settle_qris_payment_sync(payment_id: int) -> tuple[bool, str]:
+    """Synchronous wrapper to check and settle QRIS payment, safe to call from web server threads."""
+    try:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_check_and_settle_qris_payment(None, payment_id))
+        finally:
+            loop.close()
+    except Exception as exc:
+        logger.warning("Error in sync QRIS check for payment %s: %s", payment_id, exc)
+        return False, str(exc)
+
+
 async def _shopeepay_mutation_poller(application) -> None:
     """Background polling loop that checks ShopeePay mutations every 8-10 seconds for pending QRIS."""
     logger.info("ShopeePay mutation poller started (dynamic QRIS background check)")
@@ -3526,10 +3548,11 @@ async def _shopeepay_mutation_poller(application) -> None:
                 exp_kb = InlineKeyboardMarkup([
                     [InlineKeyboardButton("🏠 Menu Utama", callback_data="menu:main")],
                 ])
-                try:
-                    await _update_user_payment_message(application, exp_p, exp_text, exp_kb)
-                except Exception as exc:
-                    logger.debug("Could not notify user for expired payment #%s: %s", exp_p["id"], exc)
+                if exp_p.get("user_id") and exp_p["user_id"] != 0:
+                    try:
+                        await _update_user_payment_message(application, exp_p, exp_text, exp_kb)
+                    except Exception as exc:
+                        logger.debug("Could not notify user for expired payment #%s: %s", exp_p["id"], exc)
 
             # 2. Check active pending QRIS orders within the 15-minute window
             with _db() as connection:

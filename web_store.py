@@ -10,17 +10,20 @@ import json
 import logging
 import os
 import re
+import secrets
 import socket
 import sys
 import threading
 import time
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
-
-from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
+
+import qris_engine
+import shopeepay_engine
 
 logger = logging.getLogger("web_store")
 if not logger.handlers:
@@ -382,6 +385,262 @@ def get_all_products_data() -> list[dict[str, Any]]:
         })
 
     return products
+
+
+def create_web_qris_order(product_key: str, contact: str = "") -> dict[str, Any]:
+    """Create a new pending dynamic QRIS order for direct Web Store checkout."""
+    ensure_prodseller_cache_sync()
+
+    if product_key == "docs":
+        return {
+            "status": "error",
+            "message": "Produk Canva Doc Education memerlukan pemilihan negara & verifikasi khusus via Bot Telegram.",
+        }
+
+    try:
+        import telegram_bot
+        is_active_func = getattr(telegram_bot, "_is_product_active", lambda k: True)
+        stock_status_func = getattr(telegram_bot, "_get_product_stock_status", lambda k: True)
+        setting_func = getattr(telegram_bot, "_setting", lambda k, d: d)
+        catalog = getattr(telegram_bot, "_PRODUCT_CATALOG", {})
+        get_catalog_price_func = getattr(telegram_bot, "_get_catalog_product_price", None)
+        allocator = getattr(telegram_bot, "_amount_allocator", None)
+        db_func = getattr(telegram_bot, "_db", None)
+    except Exception as exc:
+        logger.error("Failed to import telegram_bot helpers: %s", exc)
+        return {"status": "error", "message": f"Server database error: {exc}"}
+
+    if not is_active_func(product_key):
+        return {"status": "error", "message": "Produk ini sedang dinonaktifkan oleh admin."}
+
+    if not stock_status_func(product_key):
+        return {"status": "error", "message": "Maaf, stok produk ini sedang habis saat ini. Silakan coba kembali nanti."}
+
+    # Resolve product name and base price in Rupiah
+    product_name = ""
+    base_price = 20000
+
+    if product_key == "gemini":
+        product_name = "Gemini Pro 18 Bulan"
+        base_price = setting_func("gemini_qris_price_idr", setting_func("gemini_price_idr", 20000))
+    elif product_key in catalog:
+        c_cfg = catalog[product_key]
+        product_name = c_cfg.get("label_id", product_key.title())
+        if get_catalog_price_func:
+            base_price = get_catalog_price_func(product_key)[0]
+        else:
+            base_price = c_cfg.get("default_qris_idr", c_cfg.get("default_idr", 20000))
+    else:
+        return {"status": "error", "message": "Produk tidak dikenali."}
+
+    if base_price <= 0:
+        base_price = 20000
+
+    # Ensure allocator is available
+    if allocator is None:
+        allocator = shopeepay_engine.UniqueAmountAllocator()
+        if "telegram_bot" in sys.modules:
+            setattr(sys.modules["telegram_bot"], "_amount_allocator", allocator)
+
+    # Query currently active pending amounts from DB to prevent collisions
+    reserved_set: set[int] = set()
+    cutoff_time = (datetime.now() - timedelta(minutes=15)).isoformat()
+    try:
+        with db_func() as conn:
+            rows = conn.execute(
+                "SELECT raw_amount FROM payment_requests WHERE method = 'qris' AND status = 'pending' AND raw_amount > 0 AND created_at >= ?",
+                (cutoff_time,),
+            ).fetchall()
+            for r in rows:
+                if r[0]:
+                    reserved_set.add(int(r[0]))
+    except Exception as exc:
+        logger.warning("Could not query reserved amounts from DB: %s", exc)
+
+    total_amount, unique_code = allocator.allocate(base_price, ttl_seconds=900, reserved_amounts=reserved_set)
+
+    # Dynamic QRIS generation via qris_engine
+    raw_static_qris = os.getenv("SHOPEE_MERCHANT_QRIS_RAW", "").strip()
+    if not raw_static_qris and hasattr(telegram_bot, "_setting_text"):
+        raw_static_qris = telegram_bot._setting_text("shopee_qris_raw", "").strip()
+
+    dynamic_qris_str = ""
+    qr_image_url = ""
+
+    if raw_static_qris:
+        try:
+            dynamic_qris_str = qris_engine.static_to_dynamic_qris(raw_static_qris, total_amount)
+            qr_image_url = qris_engine.get_qris_qr_image_url(dynamic_qris_str, size=420)
+        except Exception as exc:
+            logger.warning("Failed to generate dynamic QRIS: %s", exc)
+
+    if not qr_image_url:
+        qr_image_url = os.getenv("QRIS_IMAGE_URL", "https://quickchart.io/qr?text=QRIS_PAYMENT&size=400")
+
+    order_token = secrets.token_hex(16)
+    formatted_amount = f"Rp {total_amount:,}".replace(",", ".")
+    now_iso = datetime.now().isoformat()
+
+    try:
+        with db_func() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO payment_requests (
+                    user_id, method, amount, reference, email, status,
+                    created_at, product_key, raw_amount, qris_payload, order_token
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    0,
+                    "qris",
+                    formatted_amount,
+                    f"WEB-{order_token[:8].upper()}",
+                    contact.strip() if contact else "Web Guest",
+                    "pending",
+                    now_iso,
+                    product_key,
+                    total_amount,
+                    dynamic_qris_str,
+                    order_token,
+                ),
+            )
+            order_id = cur.lastrowid
+    except Exception as exc:
+        logger.error("Failed to insert web QRIS order: %s", exc)
+        allocator.cancel(total_amount)
+        return {"status": "error", "message": "Gagal mencatat pesanan di database."}
+
+    logger.info("⚡ Web QRIS Order created: #%s for %s (%s, Total: %s)", order_id, product_name, contact, formatted_amount)
+
+    return {
+        "ok": True,
+        "status": "success",
+        "order_id": order_id,
+        "order_token": order_token,
+        "token": order_token,
+        "product_key": product_key,
+        "product_name": product_name,
+        "base_amount": base_price,
+        "unique_code": unique_code,
+        "total_amount": total_amount,
+        "allocated_amount": total_amount,
+        "total_amount_formatted": formatted_amount,
+        "formatted_amount": formatted_amount,
+        "dynamic_qris": dynamic_qris_str,
+        "qr_image_url": qr_image_url,
+        "expires_in_seconds": 900,
+        "created_at": now_iso,
+    }
+
+
+def get_web_order_status(order_token: str) -> dict[str, Any]:
+    """Retrieve live order status and delivered credentials for Web Store polling."""
+    if not order_token or len(order_token) < 16:
+        return {"ok": False, "status": "error", "message": "Token pesanan tidak valid", "error": "Token tidak valid"}
+
+    try:
+        import telegram_bot
+        db_func = getattr(telegram_bot, "_db", None)
+        allocator = getattr(telegram_bot, "_amount_allocator", None)
+        settle_func = getattr(telegram_bot, "_check_and_settle_qris_payment_sync", None)
+    except Exception as exc:
+        return {"ok": False, "status": "error", "message": str(exc), "error": str(exc)}
+
+    try:
+        with db_func() as conn:
+            row = conn.execute(
+                "SELECT * FROM payment_requests WHERE order_token = ?", (order_token,)
+            ).fetchone()
+            if not row:
+                return {"ok": False, "status": "not_found", "message": "Pesanan tidak ditemukan"}
+
+            p = dict(row)
+
+            # Check if pending order has exceeded 15 minutes TTL
+            if p["status"] == "pending":
+                created_dt = datetime.fromisoformat(p["created_at"])
+                elapsed = (datetime.now() - created_dt).total_seconds()
+                if elapsed > 900:
+                    conn.execute(
+                        "UPDATE payment_requests SET status = 'expired', reviewed_at = ? WHERE id = ?",
+                        (datetime.now().isoformat(), p["id"]),
+                    )
+                    if allocator and p.get("raw_amount"):
+                        allocator.cancel(p["raw_amount"])
+                    return {"ok": True, "status": "expired", "message": "Batas waktu pembayaran 15 menit telah habis"}
+
+                # On-demand live verification against ShopeePay mutations
+                if settle_func:
+                    try:
+                        settled, msg = settle_func(p["id"])
+                        if settled:
+                            updated_row = conn.execute(
+                                "SELECT * FROM payment_requests WHERE id = ?", (p["id"],)
+                            ).fetchone()
+                            if updated_row:
+                                p = dict(updated_row)
+                    except Exception as poll_err:
+                        logger.debug("On-demand ShopeePay check for order #%s error: %s", p["id"], poll_err)
+
+                if p["status"] == "pending":
+                    return {
+                        "ok": True,
+                        "status": "pending",
+                        "order_id": p["id"],
+                        "amount": p["amount"],
+                        "expires_in_seconds": max(0, int(900 - elapsed)),
+                    }
+
+            if p["status"] == "approved":
+                return {
+                    "ok": True,
+                    "status": "approved",
+                    "order_id": p["id"],
+                    "product_key": p.get("product_key", ""),
+                    "amount": p["amount"],
+                    "provider_order_id": p.get("provider_order_id", ""),
+                    "delivered_data": p.get("delivered_data", ""),
+                    "approved_at": p.get("reviewed_at", ""),
+                }
+
+            return {
+                "ok": True,
+                "status": p["status"],
+                "order_id": p["id"],
+                "message": f"Status pesanan: {p['status']}",
+            }
+    except Exception as exc:
+        logger.error("Error checking web order status: %s", exc)
+        return {"ok": False, "status": "error", "message": str(exc)}
+
+
+def cancel_web_order(order_token: str) -> dict[str, Any]:
+    """User cancels active pending QRIS order, freeing unique amount immediately."""
+    if not order_token:
+        return {"ok": False, "status": "error", "message": "Token tidak valid"}
+
+    try:
+        import telegram_bot
+        db_func = getattr(telegram_bot, "_db", None)
+        allocator = getattr(telegram_bot, "_amount_allocator", None)
+        with db_func() as conn:
+            row = conn.execute(
+                "SELECT id, status, raw_amount FROM payment_requests WHERE order_token = ?", (order_token,)
+            ).fetchone()
+            if not row:
+                return {"ok": False, "status": "not_found", "message": "Pesanan tidak ditemukan"}
+            if row["status"] != "pending":
+                return {"ok": False, "status": "error", "message": f"Pesanan sudah berstatus '{row['status']}'"}
+
+            conn.execute(
+                "UPDATE payment_requests SET status = 'cancelled', reviewed_at = ? WHERE id = ?",
+                (datetime.now().isoformat(), row["id"]),
+            )
+            if allocator and row["raw_amount"]:
+                allocator.cancel(row["raw_amount"])
+            return {"ok": True, "status": "success", "message": "Pesanan berhasil dibatalkan"}
+    except Exception as exc:
+        return {"ok": False, "status": "error", "message": str(exc)}
 
 
 def render_html_page() -> str:
@@ -1151,6 +1410,199 @@ def render_html_page() -> str:
       border: 1px solid var(--glass-border);
       color: var(--text-main);
     }}
+    .cta-qris {{
+      background: linear-gradient(135deg, #059669 0%, #10b981 50%, #06b6d4 100%);
+      color: #fff;
+      box-shadow: 0 8px 24px -4px rgba(16, 185, 129, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+    }}
+    .cta-qris:hover, .cta-qris:active {{
+      box-shadow: 0 12px 28px -4px rgba(16, 185, 129, 0.85);
+      transform: translateY(-1px);
+    }}
+
+    /* QRIS Direct Checkout Modal Styles */
+    .qris-drawer {{
+      max-width: 460px;
+    }}
+    .qris-notice-box {{
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      margin-top: 10px;
+    }}
+    .qris-card-wrap {{
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      margin-top: 10px;
+    }}
+    .qris-img-container {{
+      background: #ffffff;
+      padding: 14px;
+      border-radius: 20px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+      text-align: center;
+      display: inline-block;
+      max-width: 260px;
+    }}
+    .qris-img {{
+      width: 220px;
+      height: 220px;
+      display: block;
+      margin: 0 auto;
+      border-radius: 8px;
+    }}
+    .qris-scan-guide {{
+      font-size: 10px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-top: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }}
+    .qris-amount-card {{
+      width: 100%;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      text-align: center;
+    }}
+    .qris-total-amount {{
+      font-size: 26px;
+      font-weight: 800;
+      color: #34d399;
+      letter-spacing: -0.02em;
+    }}
+    .copy-badge-btn {{
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #a7f3d0;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }}
+    .copy-badge-btn:hover, .copy-badge-btn:active {{
+      background: #10b981;
+      color: #fff;
+    }}
+    .qris-code-warn {{
+      font-size: 11px;
+      color: #fbbf24;
+      line-height: 1.45;
+      margin-top: 6px;
+    }}
+    .timer-bar {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(244, 63, 94, 0.1);
+      border: 1px solid rgba(244, 63, 94, 0.25);
+      border-radius: 999px;
+      padding: 5px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #f87171;
+    }}
+    .success-icon-squircle {{
+      width: 68px;
+      height: 68px;
+      border-radius: 22px;
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      border: 1.5px solid rgba(255, 255, 255, 0.4);
+      box-shadow: 0 12px 28px -4px rgba(16, 185, 129, 0.6), inset 0 2px 2px rgba(255, 255, 255, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      font-weight: bold;
+      color: #ffffff;
+      margin: 0 auto;
+    }}
+    .delivered-box {{
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      margin-top: 8px;
+    }}
+    .credentials-pre {{
+      background: #020617;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      padding: 12px 14px;
+      color: #38bdf8;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12.5px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 200px;
+      overflow-y: auto;
+      text-align: left;
+    }}
+    .history-card {{
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }}
+    .history-card:hover {{
+      background: rgba(255, 255, 255, 0.055);
+      border-color: rgba(99, 102, 241, 0.3);
+    }}
+    .history-badge-pending {{
+      font-size: 10px;
+      font-weight: 700;
+      color: #fbbf24;
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      padding: 2px 7px;
+      border-radius: 6px;
+    }}
+    .history-badge-approved {{
+      font-size: 10px;
+      font-weight: 700;
+      color: #34d399;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 2px 7px;
+      border-radius: 6px;
+    }}
+    .history-btn-sm {{
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--glass-border);
+      color: var(--text-main);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      text-decoration: none;
+      transition: all 0.15s;
+    }}
+    .history-btn-sm:hover {{
+      background: rgba(255, 255, 255, 0.15);
+      transform: translateY(-1px);
+    }}
+    .history-btn-resume {{
+      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+      color: #fff;
+      border: none;
+    }}
 
     /* Toast Alert */
     .toast {{
@@ -1293,7 +1745,9 @@ def render_html_page() -> str:
         <a href="https://t.me/{bot_username}" target="_blank" class="lynk-btn lynk-btn-primary">
           <div class="btn-left">
             <div class="tactile-tile btn-tile" style="background: linear-gradient(135deg, #0088cc 0%, #00b4d8 100%); --tile-shadow: rgba(0, 180, 216, 0.45);">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="#ffffff"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 0 0-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/></svg>
+              <div style="width: 24px; height: 24px; border-radius: 50%; background: #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 5px rgba(0,0,0,0.18);">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="#0088cc"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 0 0-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/></svg>
+              </div>
             </div>
             <span>Buka Bot Telegram</span>
           </div>
@@ -1345,6 +1799,28 @@ def render_html_page() -> str:
       </div>
     </section>
 
+    <!-- History & Order Status Action Card (Telegram Bot Button Theme) -->
+    <div style="width: 100%; margin: 12px 0 10px;">
+      <button id="btnOrderHistory" type="button" class="lynk-btn lynk-btn-primary" style="width: 100%; text-align: left; padding: 10px 18px 10px 12px; border-radius: var(--radius-md);">
+        <div class="btn-left">
+          <div class="tactile-tile btn-tile" style="background: linear-gradient(135deg, #0088cc 0%, #00b4d8 100%); --tile-shadow: rgba(0, 180, 216, 0.45); box-shadow: 0 4px 14px rgba(0, 180, 216, 0.4);">
+            <div style="width: 24px; height: 24px; border-radius: 50%; background: #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 5px rgba(0,0,0,0.18);">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#0088cc" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+                <path d="M12 7v5l4 2"/>
+              </svg>
+            </div>
+          </div>
+          <span style="font-weight: 700; font-size: 14.5px; color: #ffffff; letter-spacing: -0.2px;">Riwayat Pesanan</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span id="historyBadgeCount" style="display: none; font-size: 11px; font-weight: 800; color: #ffffff; background: #0088cc; padding: 2px 8px; border-radius: 999px; box-shadow: 0 2px 8px rgba(0, 136, 204, 0.45);">0</span>
+          <span class="btn-chevron" style="color: rgba(255, 255, 255, 0.65); font-size: 14px;">➜</span>
+        </div>
+      </button>
+    </div>
+
     <!-- Sticky Search and Filter Controls -->
     <div class="controls-wrapper">
       <div class="search-box">
@@ -1366,6 +1842,19 @@ def render_html_page() -> str:
         <div class="currency-switch">
           <button id="currIdr" class="curr-btn active">IDR</button>
           <button id="currUsdt" class="curr-btn">USDT</button>
+        </div>
+      </div>
+
+      <!-- Pending Order Recovery Banner -->
+      <div id="pendingOrderBanner" style="display: none; width: 100%; margin-top: 10px; background: linear-gradient(135deg, rgba(245, 158, 11, 0.16) 0%, rgba(239, 68, 68, 0.14) 100%); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 14px; padding: 10px 14px; cursor: pointer;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="status-dot" style="background: #f59e0b; box-shadow: 0 0 8px #f59e0b;"></span>
+            <div style="font-size: 11.5px; font-weight: 700; color: #fde68a;">
+              Ada Pesanan QRIS Berjalan (<span id="bannerOrderAmount">Rp 0</span>)
+            </div>
+          </div>
+          <span style="font-size: 11px; font-weight: 800; color: #fbbf24; background: rgba(245, 158, 11, 0.2); padding: 4px 8px; border-radius: 8px;">Buka QRIS ➜</span>
         </div>
       </div>
     </div>
@@ -1432,6 +1921,13 @@ def render_html_page() -> str:
       </div>
 
       <div class="modal-actions">
+        <button id="modalQrisPayBtn" class="cta-btn cta-qris" style="display: none;">
+          <div class="tactile-tile" style="background: rgba(255, 255, 255, 0.2); width: 28px; height: 28px; border-radius: 8px;">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#ffffff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          </div>
+          <span>⚡ Bayar Langsung via QRIS (Web)</span>
+          <span>➜</span>
+        </button>
         <a id="modalBuyLink" href="#" target="_blank" class="cta-btn cta-primary">
           <span>🛒 Beli di Bot Telegram</span>
           <span>➜</span>
@@ -1442,6 +1938,155 @@ def render_html_page() -> str:
         <a href="{support_url}" target="_blank" class="cta-btn cta-secondary">
           <span>💬 Tanya Customer Service</span>
         </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- QRIS Direct Web Checkout Modal -->
+  <div class="modal-backdrop" id="qrisCheckoutModal">
+    <div class="modal-drawer qris-drawer">
+      <div class="drawer-handle"></div>
+      
+      <!-- View 1: Initiate / Input Contact -->
+      <div id="qrisViewInit" style="display: block;">
+        <div class="drawer-header">
+          <div class="drawer-icon" id="qrisProdIcon">⚡</div>
+          <div class="drawer-info">
+            <h2 class="drawer-title" id="qrisProdTitle">Nama Produk</h2>
+            <div class="prod-badge" id="qrisProdPrice">Rp 0</div>
+          </div>
+          <button class="drawer-close" id="qrisCloseBtn">✕</button>
+        </div>
+
+        <div class="qris-notice-box">
+          <div style="display: flex; gap: 8px; align-items: flex-start;">
+            <span style="font-size: 16px;">💡</span>
+            <div style="font-size: 12px; line-height: 1.5; color: var(--text-main);">
+              <b>Pembayaran Otomatis & Terverifikasi Real-time</b><br>
+              <span style="color: var(--text-muted);">Mendukung semua m-Banking (BCA, Mandiri, BRI, BNI) & E-Wallet (GoPay, OVO, DANA, ShopeePay). Kredensial akun akan langsung dikirim di layar setelah pembayaran berhasil.</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 14px;">
+          <label style="font-size: 11.5px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; display: block; margin-bottom: 6px;">
+            Email atau No. WhatsApp (Opsional):
+          </label>
+          <input type="text" id="qrisContactInput" class="search-input" style="padding: 12px 14px;" placeholder="cth: pembeli@gmail.com atau 0812xxxx">
+          <div style="font-size: 10.5px; color: var(--text-dim); margin-top: 4px;">
+            Digunakan sebagai arsip & backup bukti pembelian Anda.
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 18px;">
+          <button id="qrisConfirmPayBtn" class="cta-btn cta-qris" style="padding: 15px;">
+            <span>Lanjut Tampilkan QRIS ➜</span>
+          </button>
+          <button id="qrisCancelInitBtn" class="cta-btn cta-secondary">
+            <span>Kembali</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- View 2: Live QRIS & Timer & Auto-Polling -->
+      <div id="qrisViewPaying" style="display: none;">
+        <div class="drawer-header">
+          <div class="drawer-info">
+            <h2 class="drawer-title" style="font-size: 17px;" id="qrisPayingProdTitle">Pembayaran QRIS</h2>
+            <div style="display: flex; align-items: center; gap: 6px; margin-top: 2px;">
+              <span class="status-dot"></span>
+              <span style="font-size: 11px; font-weight: 600; color: #34d399;" id="qrisPollStatusText">Mengecek mutasi otomatis...</span>
+            </div>
+          </div>
+          <button class="drawer-close" id="qrisClosePayingBtn">✕</button>
+        </div>
+
+        <div class="qris-card-wrap">
+          <div class="qris-img-container">
+            <img id="qrisImgTag" src="" alt="Scan QRIS Dinamis" class="qris-img">
+            <div class="qris-scan-guide">Scan via m-Banking atau E-Wallet apa saja</div>
+          </div>
+
+          <div class="qris-amount-card">
+            <div style="font-size: 10.5px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em;">TOTAL PEMBAYARAN PAS:</div>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin: 4px 0;">
+              <span class="qris-total-amount" id="qrisTotalAmountText">Rp 0</span>
+              <button class="copy-badge-btn" id="qrisCopyAmountBtn" title="Salin Nominal">Salin</button>
+            </div>
+            <div class="qris-code-warn">
+              ⚠️ Wajib transfer persis <b><span id="qrisExactWarn">Rp 0</span></b> (termasuk 3 digit kode unik) agar pesanan otomatis diproses dalam hitungan detik!
+            </div>
+          </div>
+
+          <div class="timer-bar">
+            <span>⏱️ Batas Waktu Pembayaran:</span>
+            <span id="qrisTimerCountdown" style="font-weight: 800; color: #fb7185;">14:59</span>
+          </div>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 14px;">
+          <button id="qrisDownloadQrBtn" type="button" class="cta-btn cta-secondary" style="font-size: 12.5px;">
+            <span>📥 Simpan Gambar QR ke Galeri</span>
+          </button>
+          <button id="qrisCancelOrderBtn" class="cta-btn cta-secondary" style="color: #fb7185; border-color: rgba(244, 63, 94, 0.3); font-size: 12.5px;">
+            <span>❌ Batalkan Pesanan</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- View 3: Success & Immediate Account Delivery -->
+      <div id="qrisViewSuccess" style="display: none;">
+        <div style="text-align: center; padding: 10px 0 16px;">
+          <div class="success-icon-squircle">✓</div>
+          <h2 style="font-size: 20px; font-weight: 800; color: #fff; margin-top: 10px;">Pembayaran Berhasil!</h2>
+          <p style="font-size: 12.5px; color: var(--text-muted); margin-top: 4px;">Terima kasih, akun & lisensi Anda telah aktif seketika.</p>
+        </div>
+
+        <div class="delivered-box">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 11px; font-weight: 700; color: #34d399; text-transform: uppercase;">🔑 KREDENSIAL AKUN / LISENSI:</span>
+            <span style="font-size: 10px; color: var(--text-dim);" id="qrisSuccessOrderId">Order #0</span>
+          </div>
+          <pre class="credentials-pre" id="qrisCredentialsText"></pre>
+        </div>
+
+        <div class="modal-actions" style="margin-top: 16px;">
+          <button id="qrisCopyCredsBtn" class="cta-btn cta-primary">
+            <span>📋 Salin Data Akun / Lisensi</span>
+          </button>
+          <button id="qrisDownloadTxtBtn" class="cta-btn cta-secondary">
+            <span>📥 Unduh File Lisensi (.txt)</span>
+          </button>
+          <button id="qrisFinishBtn" class="cta-btn cta-secondary">
+            <span>Selesai / Tutup</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Order History Modal Drawer -->
+  <div class="modal-backdrop" id="historyModal">
+    <div class="modal-drawer qris-drawer">
+      <div class="drawer-handle"></div>
+      <div class="drawer-header">
+        <div class="drawer-icon" style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);">🕒</div>
+        <div class="drawer-info">
+          <h2 class="drawer-title">Riwayat Pesanan Anda</h2>
+          <div style="font-size: 11px; color: var(--text-muted);">Akses kredensial & cek status pesanan web</div>
+        </div>
+        <button class="drawer-close" id="historyCloseBtn">✕</button>
+      </div>
+
+      <div id="historyListContainer" style="margin-top: 14px; display: flex; flex-direction: column; gap: 10px; max-height: 52vh; overflow-y: auto; padding-right: 2px;">
+        <!-- Populated by JS -->
+      </div>
+
+      <div class="modal-actions" style="margin-top: 16px;">
+        <button id="historyDoneBtn" class="cta-btn cta-secondary">
+          <span>Tutup</span>
+        </button>
       </div>
     </div>
   </div>
@@ -1480,12 +2125,109 @@ def render_html_page() -> str:
     const modalDesc = document.getElementById('modalDesc');
     const modalBuyLink = document.getElementById('modalBuyLink');
     const modalCopyBtn = document.getElementById('modalCopyBtn');
+    const modalQrisPayBtn = document.getElementById('modalQrisPayBtn');
     const toast = document.getElementById('toastMsg');
+
+    // QRIS Checkout Modal DOM Elements
+    const qrisCheckoutModal = document.getElementById('qrisCheckoutModal');
+    const qrisViewInit = document.getElementById('qrisViewInit');
+    const qrisViewPaying = document.getElementById('qrisViewPaying');
+    const qrisViewSuccess = document.getElementById('qrisViewSuccess');
+
+    const qrisProdIcon = document.getElementById('qrisProdIcon');
+    const qrisProdTitle = document.getElementById('qrisProdTitle');
+    const qrisProdPrice = document.getElementById('qrisProdPrice');
+    const qrisContactInput = document.getElementById('qrisContactInput');
+    const qrisConfirmPayBtn = document.getElementById('qrisConfirmPayBtn');
+    const qrisCancelInitBtn = document.getElementById('qrisCancelInitBtn');
+    const qrisCloseBtn = document.getElementById('qrisCloseBtn');
+
+    const qrisPayingProdTitle = document.getElementById('qrisPayingProdTitle');
+    const qrisPollStatusText = document.getElementById('qrisPollStatusText');
+    const qrisClosePayingBtn = document.getElementById('qrisClosePayingBtn');
+    const qrisImgTag = document.getElementById('qrisImgTag');
+    const qrisDownloadQrBtn = document.getElementById('qrisDownloadQrBtn');
+    const qrisTotalAmountText = document.getElementById('qrisTotalAmountText');
+    const qrisCopyAmountBtn = document.getElementById('qrisCopyAmountBtn');
+    const qrisExactWarn = document.getElementById('qrisExactWarn');
+    const qrisTimerCountdown = document.getElementById('qrisTimerCountdown');
+    const qrisCancelOrderBtn = document.getElementById('qrisCancelOrderBtn');
+
+    const qrisSuccessOrderId = document.getElementById('qrisSuccessOrderId');
+    const qrisCredentialsText = document.getElementById('qrisCredentialsText');
+    const qrisCopyCredsBtn = document.getElementById('qrisCopyCredsBtn');
+    const qrisDownloadTxtBtn = document.getElementById('qrisDownloadTxtBtn');
+    const qrisFinishBtn = document.getElementById('qrisFinishBtn');
+
+    // Order History & Recovery Elements
+    const btnOrderHistory = document.getElementById('btnOrderHistory');
+    const pendingOrderBanner = document.getElementById('pendingOrderBanner');
+    const bannerOrderAmount = document.getElementById('bannerOrderAmount');
+    const historyModal = document.getElementById('historyModal');
+    const historyCloseBtn = document.getElementById('historyCloseBtn');
+    const historyDoneBtn = document.getElementById('historyDoneBtn');
+    const historyListContainer = document.getElementById('historyListContainer');
+
+    let activeOrder = null;
+    let pollInterval = null;
+    let countdownInterval = null;
 
     function showToast(msg) {{
       toast.textContent = msg;
       toast.classList.add('show');
       setTimeout(() => toast.classList.remove('show'), 2400);
+    }}
+
+    // --- Order History LocalStorage Management ---
+    function getStoredOrders() {{
+      try {{
+        return JSON.parse(localStorage.getItem('yowes_orders') || '[]');
+      }} catch (e) {{
+        return [];
+      }}
+    }}
+
+    function saveOrderToHistory(order) {{
+      if (!order || !order.token) return;
+      try {{
+        let list = getStoredOrders();
+        const existingIdx = list.findIndex(item => item.token === order.token);
+        if (existingIdx >= 0) {{
+          list[existingIdx] = Object.assign(list[existingIdx], order);
+        }} else {{
+          list.unshift(order);
+        }}
+        localStorage.setItem('yowes_orders', JSON.stringify(list.slice(0, 15)));
+        updatePendingBanner();
+      }} catch (e) {{}}
+    }}
+
+    function updatePendingBanner() {{
+      const list = getStoredOrders();
+      // Find latest pending order that is less than 15 minutes old
+      const pending = list.find(item => {{
+        if (item.status !== 'pending') return false;
+        const created = new Date(item.created_at || 0).getTime();
+        return (Date.now() - created) < 900000;
+      }});
+
+      if (pending) {{
+        bannerOrderAmount.textContent = pending.amount_formatted || 'QRIS';
+        pendingOrderBanner.style.display = 'block';
+        pendingOrderBanner.onclick = () => resumePendingOrder(pending);
+      }} else {{
+        pendingOrderBanner.style.display = 'none';
+      }}
+
+      const countEl = document.getElementById('historyBadgeCount');
+      if (countEl) {{
+        if (list.length > 0) {{
+          countEl.textContent = list.length;
+          countEl.style.display = 'inline-block';
+        }} else {{
+          countEl.style.display = 'none';
+        }}
+      }}
     }}
 
     function renderProducts() {{
@@ -1558,8 +2300,8 @@ def render_html_page() -> str:
       const priceDisplay = p.is_coin_price
         ? (p.price_coins_formatted || `${{p.coins || 3}} Koin`)
         : ((currentCurrency === 'IDR') 
-            ? `${{p.price_idr_formatted}} (${{p.price_usdt}} USDT)` 
-            : `${{p.price_usdt}} USDT (${{p.price_idr_formatted}})`);
+            ? p.price_idr_formatted 
+            : `${{p.price_usdt}} USDT`);
       modalPrice.textContent = priceDisplay;
 
       const stockClass = p.in_stock ? 'stock-ready' : 'stock-out';
@@ -1573,17 +2315,30 @@ def render_html_page() -> str:
 
       modalDesc.textContent = p.description || p.highlight || 'Tidak ada petunjuk khusus.';
       modalBuyLink.href = p.buy_url;
+
+      // QRIS payment button visibility: hide for doc builder or out-of-stock
+      if (p.key !== 'docs' && p.in_stock) {{
+        modalQrisPayBtn.style.display = 'flex';
+      }} else {{
+        modalQrisPayBtn.style.display = 'none';
+      }}
+
       modal.classList.add('open');
     }}
 
     function closeModal() {{
       modal.classList.remove('open');
-      selectedProduct = null;
     }}
 
-    modalClose.addEventListener('click', closeModal);
+    modalClose.addEventListener('click', () => {{
+      closeModal();
+      selectedProduct = null;
+    }});
     modal.addEventListener('click', (e) => {{
-      if (e.target === modal) closeModal();
+      if (e.target === modal) {{
+        closeModal();
+        selectedProduct = null;
+      }}
     }});
 
     modalCopyBtn.addEventListener('click', () => {{
@@ -1595,6 +2350,467 @@ def render_html_page() -> str:
         }});
       }} else {{
         showToast('Link: ' + shareUrl);
+      }}
+    }});
+
+    // --- QRIS Direct Checkout Flow ---
+    function openQrisCheckout(p) {{
+      if (!p) return;
+      closeModal();
+
+      qrisProdIcon.innerHTML = p.icon_svg;
+      qrisProdIcon.style.background = p.gradient;
+      qrisProdTitle.textContent = p.name;
+      qrisProdPrice.textContent = p.price_idr_formatted;
+
+      const savedContact = localStorage.getItem('yowes_contact') || '';
+      qrisContactInput.value = savedContact;
+
+      qrisViewInit.style.display = 'block';
+      qrisViewPaying.style.display = 'none';
+      qrisViewSuccess.style.display = 'none';
+      qrisCheckoutModal.classList.add('open');
+    }}
+
+    function closeQrisCheckout() {{
+      qrisCheckoutModal.classList.remove('open');
+      stopPolling();
+      stopCountdown();
+      updatePendingBanner();
+    }}
+
+    function stopPolling() {{
+      if (pollInterval) {{
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }}
+    }}
+
+    function stopCountdown() {{
+      if (countdownInterval) {{
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+      }}
+    }}
+
+    function formatTime(seconds) {{
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return `${{m.toString().padStart(2, '0')}}:${{s.toString().padStart(2, '0')}}`;
+    }}
+
+    async function handleCreateOrder() {{
+      if (!selectedProduct) return;
+      const contactVal = qrisContactInput.value.trim();
+      if (contactVal) {{
+        localStorage.setItem('yowes_contact', contactVal);
+      }}
+
+      qrisConfirmPayBtn.disabled = true;
+      const origHtml = qrisConfirmPayBtn.innerHTML;
+      qrisConfirmPayBtn.innerHTML = '<span>Membuat QRIS Dinamis...</span>';
+
+      try {{
+        const resp = await fetch('/api/order/create', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{
+            product_key: selectedProduct.key,
+            contact: contactVal
+          }})
+        }});
+
+        const result = await resp.json();
+        if (!resp.ok || (result.status !== 'success' && !result.ok)) {{
+          showToast(result.message || result.error || 'Gagal membuat pesanan QRIS.');
+          qrisConfirmPayBtn.disabled = false;
+          qrisConfirmPayBtn.innerHTML = origHtml;
+          return;
+        }}
+
+        activeOrder = result;
+        showPayingView(result);
+
+      }} catch (err) {{
+        showToast('Koneksi terputus. Silakan coba lagi.');
+      }} finally {{
+        qrisConfirmPayBtn.disabled = false;
+        qrisConfirmPayBtn.innerHTML = origHtml;
+      }}
+    }}
+
+    function showPayingView(order) {{
+      qrisViewInit.style.display = 'none';
+      qrisViewPaying.style.display = 'block';
+      qrisViewSuccess.style.display = 'none';
+
+      const prodName = selectedProduct ? selectedProduct.name : (order.product_name || 'Pembayaran QRIS');
+      qrisPayingProdTitle.textContent = prodName;
+      qrisImgTag.src = order.qr_image_url;
+      const fmtAmount = order.total_amount_formatted || order.formatted_amount || `Rp ${{Number(order.total_amount || order.allocated_amount).toLocaleString('id-ID')}}`;
+      qrisTotalAmountText.textContent = fmtAmount;
+      qrisExactWarn.textContent = fmtAmount;
+      qrisCopyAmountBtn.dataset.amount = order.total_amount || order.allocated_amount;
+      qrisPollStatusText.textContent = 'Mengecek mutasi otomatis...';
+
+      // Save to localStorage history
+      saveOrderToHistory({{
+        token: order.token || order.order_token,
+        product_name: prodName,
+        product_key: selectedProduct ? selectedProduct.key : (order.product_key || ''),
+        amount_formatted: fmtAmount,
+        amount_raw: order.total_amount || order.allocated_amount,
+        qr_image_url: order.qr_image_url,
+        status: 'pending',
+        created_at: order.created_at || new Date().toISOString()
+      }});
+
+      let remaining = order.expires_in_seconds || 900;
+      qrisTimerCountdown.textContent = formatTime(remaining);
+      stopCountdown();
+      countdownInterval = setInterval(() => {{
+        remaining--;
+        if (remaining <= 0) {{
+          stopCountdown();
+          stopPolling();
+          qrisTimerCountdown.textContent = '00:00';
+          qrisPollStatusText.textContent = 'Batas waktu pembayaran berakhir.';
+          showToast('Waktu pembayaran QRIS telah habis.');
+          saveOrderToHistory({{
+            token: order.token || order.order_token,
+            status: 'expired'
+          }});
+        }} else {{
+          qrisTimerCountdown.textContent = formatTime(remaining);
+        }}
+      }}, 1000);
+
+      stopPolling();
+      pollInterval = setInterval(pollOrderStatus, 3500);
+      // Run immediate poll check once
+      setTimeout(pollOrderStatus, 800);
+    }}
+
+    async function pollOrderStatus() {{
+      const token = activeOrder ? (activeOrder.token || activeOrder.order_token) : null;
+      if (!token) return;
+      try {{
+        const resp = await fetch(`/api/order/status?token=${{encodeURIComponent(token)}}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        if (data.status === 'approved') {{
+          stopPolling();
+          stopCountdown();
+          showSuccessView(data);
+        }} else if (data.status === 'expired' || data.status === 'cancelled') {{
+          stopPolling();
+          stopCountdown();
+          saveOrderToHistory({{
+            token: token,
+            status: data.status
+          }});
+          showToast('Pesanan telah kedaluwarsa atau dibatalkan.');
+          closeQrisCheckout();
+        }}
+      }} catch (e) {{
+        // Retry silently next loop
+      }}
+    }}
+
+    function showSuccessView(data) {{
+      qrisViewInit.style.display = 'none';
+      qrisViewPaying.style.display = 'none';
+      qrisViewSuccess.style.display = 'block';
+
+      const token = activeOrder ? (activeOrder.token || activeOrder.order_token) : '';
+      qrisSuccessOrderId.textContent = `Order #${{data.order_id || (token ? token.slice(0, 8) : '0')}}`;
+      qrisCredentialsText.textContent = data.delivered_data || 'Pesanan berhasil diverifikasi. Terima kasih!';
+
+      saveOrderToHistory({{
+        token: token,
+        status: 'approved',
+        delivered_data: data.delivered_data,
+        order_id: data.order_id,
+        completed_at: new Date().toISOString()
+      }});
+
+      showToast('🎉 Pembayaran berhasil diterima!');
+    }}
+
+    async function cancelCurrentOrder() {{
+      const token = activeOrder ? (activeOrder.token || activeOrder.order_token) : null;
+      if (!token) {{
+        closeQrisCheckout();
+        return;
+      }}
+      if (!confirm('Yakin ingin membatalkan pesanan pembayaran ini?')) return;
+
+      try {{
+        await fetch('/api/order/cancel', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ token: token }})
+        }});
+      }} catch (e) {{}}
+
+      saveOrderToHistory({{
+        token: token,
+        status: 'cancelled'
+      }});
+
+      stopPolling();
+      stopCountdown();
+      activeOrder = null;
+      closeQrisCheckout();
+      showToast('Pesanan berhasil dibatalkan.');
+    }}
+
+    // --- Order History UI Modal Flow ---
+    function openHistoryModal() {{
+      renderHistoryModal();
+      historyModal.classList.add('open');
+    }}
+
+    function closeHistoryModal() {{
+      historyModal.classList.remove('open');
+    }}
+
+    function renderHistoryModal() {{
+      const list = getStoredOrders();
+      if (!list || list.length === 0) {{
+        historyListContainer.innerHTML = `
+          <div style="text-align: center; padding: 28px 16px; color: var(--text-muted); font-size: 13px;">
+            <div style="font-size: 28px; margin-bottom: 8px;">📭</div>
+            Belum ada riwayat pesanan di perangkat ini.
+          </div>
+        `;
+        return;
+      }}
+
+      historyListContainer.innerHTML = '';
+      list.forEach(item => {{
+        const card = document.createElement('div');
+        card.className = 'history-card';
+
+        const isApproved = (item.status === 'approved');
+        const isPending = (item.status === 'pending');
+        const badgeClass = isApproved ? 'history-badge-approved' : (isPending ? 'history-badge-pending' : 'history-badge-pending');
+        const badgeText = isApproved ? '✓ Berhasil' : (isPending ? '⏳ Menunggu Bayar' : item.status);
+        const dateStr = item.created_at ? new Date(item.created_at).toLocaleString('id-ID', {{ dateStyle: 'medium', timeStyle: 'short' }}) : '-';
+
+        let actionBtns = '';
+        if (isApproved) {{
+          actionBtns = `
+            <button class="history-btn-sm" onclick="viewHistoryCredentials('${{item.token}}')">
+              <span>🔑 Lihat Akun</span>
+            </button>
+            <button class="history-btn-sm" onclick="downloadHistoryTxt('${{item.token}}')">
+              <span>📥 Unduh .txt</span>
+            </button>
+          `;
+        }} else if (isPending) {{
+          actionBtns = `
+            <button class="history-btn-sm history-btn-resume" onclick="resumePendingOrderFromToken('${{item.token}}')">
+              <span>⚡ Buka QRIS / Cek Status ➜</span>
+            </button>
+          `;
+        }}
+
+        card.innerHTML = `
+          <div class="history-card-top">
+            <div>
+              <div style="font-size: 13.5px; font-weight: 700; color: #fff;">${{item.product_name || 'Produk Digital'}}</div>
+              <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px;">${{dateStr}} • ${{item.amount_formatted || ''}}</div>
+            </div>
+            <span class="${{badgeClass}}">${{badgeText}}</span>
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap;">
+            ${{actionBtns}}
+          </div>
+        `;
+        historyListContainer.appendChild(card);
+      }});
+    }}
+
+    window.viewHistoryCredentials = function(token) {{
+      const list = getStoredOrders();
+      const found = list.find(it => it.token === token);
+      if (!found || !found.delivered_data) {{
+        showToast('Kredensial belum tersedia.');
+        return;
+      }}
+      closeHistoryModal();
+      activeOrder = found;
+      showSuccessView({{
+        order_id: found.order_id,
+        delivered_data: found.delivered_data
+      }});
+      qrisCheckoutModal.classList.add('open');
+    }};
+
+    window.downloadHistoryTxt = function(token) {{
+      const list = getStoredOrders();
+      const found = list.find(it => it.token === token);
+      if (!found || !found.delivered_data) return;
+      const blob = new Blob([found.delivered_data], {{ type: 'text/plain;charset=utf-8' }});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `lisensi_${{found.product_key || 'order'}}_${{Date.now()}}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('File lisensi (.txt) berhasil diunduh!');
+    }};
+
+    window.resumePendingOrderFromToken = function(token) {{
+      const list = getStoredOrders();
+      const found = list.find(it => it.token === token);
+      if (found) {{
+        closeHistoryModal();
+        resumePendingOrder(found);
+      }}
+    }};
+
+    function resumePendingOrder(order) {{
+      activeOrder = order;
+      // Calculate remaining seconds
+      const created = new Date(order.created_at || Date.now()).getTime();
+      const elapsed = Math.floor((Date.now() - created) / 1000);
+      const remaining = Math.max(10, 900 - elapsed);
+      order.expires_in_seconds = remaining;
+
+      showPayingView(order);
+      qrisCheckoutModal.classList.add('open');
+    }}
+
+    btnOrderHistory.addEventListener('click', openHistoryModal);
+    historyCloseBtn.addEventListener('click', closeHistoryModal);
+    historyDoneBtn.addEventListener('click', closeHistoryModal);
+    historyModal.addEventListener('click', (e) => {{
+      if (e.target === historyModal) closeHistoryModal();
+    }});
+
+    // Safe Download QR Without Page Navigation
+    qrisDownloadQrBtn.addEventListener('click', async () => {{
+      const qrSrc = qrisImgTag.src;
+      if (!qrSrc) return;
+      const originalText = qrisDownloadQrBtn.innerHTML;
+      qrisDownloadQrBtn.innerHTML = '<span>⏳ Memproses Gambar QR...</span>';
+
+      try {{
+        const response = await fetch(qrSrc);
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
+        if (navigator.share && navigator.canShare) {{
+          try {{
+            const file = new File([blob], 'qris_yowes_digital.png', {{ type: 'image/png' }});
+            if (navigator.canShare({{ files: [file] }})) {{
+              await navigator.share({{
+                title: 'QRIS Pembayaran Yowes Digital',
+                text: `QRIS Pembayaran ${{selectedProduct ? selectedProduct.name : ''}}`,
+                files: [file]
+              }});
+              showToast('Gambar QR berhasil dibagikan / disimpan!');
+              qrisDownloadQrBtn.innerHTML = originalText;
+              return;
+            }}
+          }} catch (shareErr) {{}}
+        }}
+
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `qris_yowes_${{Date.now()}}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+        showToast('Gambar QR berhasil diunduh ke galeri!');
+      }} catch (e) {{
+        // Fallback: open in new tab with _blank so web store tab stays completely alive!
+        window.open(qrSrc, '_blank');
+        showToast('Gambar QR dibuka di tab baru. Tekan lama gambar untuk simpan ke galeri.');
+      }} finally {{
+        qrisDownloadQrBtn.innerHTML = originalText;
+      }}
+    }});
+
+    modalQrisPayBtn.addEventListener('click', () => {{
+      if (selectedProduct) openQrisCheckout(selectedProduct);
+    }});
+
+    qrisConfirmPayBtn.addEventListener('click', handleCreateOrder);
+    qrisCloseBtn.addEventListener('click', closeQrisCheckout);
+    qrisCancelInitBtn.addEventListener('click', () => {{
+      closeQrisCheckout();
+      if (selectedProduct) openModal(selectedProduct);
+    }});
+
+    qrisClosePayingBtn.addEventListener('click', () => {{
+      if (confirm('Tutup tampilan? Verifikasi mutasi QRIS Anda tetap berjalan dan dapat dicek di menu Riwayat.')) {{
+        closeQrisCheckout();
+      }}
+    }});
+
+    qrisCancelOrderBtn.addEventListener('click', cancelCurrentOrder);
+
+    qrisCopyAmountBtn.addEventListener('click', () => {{
+      const amt = qrisCopyAmountBtn.dataset.amount;
+      if (!amt) return;
+      if (navigator.clipboard) {{
+        navigator.clipboard.writeText(amt).then(() => {{
+          showToast(`Nominal Rp ${{Number(amt).toLocaleString('id-ID')}} disalin!`);
+        }});
+      }} else {{
+        showToast(`Nominal: Rp ${{amt}}`);
+      }}
+    }});
+
+    qrisCopyCredsBtn.addEventListener('click', () => {{
+      const text = qrisCredentialsText.textContent;
+      if (!text) return;
+      if (navigator.clipboard) {{
+        navigator.clipboard.writeText(text).then(() => {{
+          showToast('Kredensial lisensi berhasil disalin!');
+        }});
+      }} else {{
+        showToast('Kredensial berhasil disalin.');
+      }}
+    }});
+
+    qrisDownloadTxtBtn.addEventListener('click', () => {{
+      const text = qrisCredentialsText.textContent;
+      if (!text) return;
+      const blob = new Blob([text], {{ type: 'text/plain;charset=utf-8' }});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const prodName = selectedProduct ? selectedProduct.key : 'pesanan';
+      a.download = `lisensi_${{prodName}}_${{Date.now()}}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('File lisensi (.txt) berhasil diunduh!');
+    }});
+
+    qrisFinishBtn.addEventListener('click', () => {{
+      closeQrisCheckout();
+      selectedProduct = null;
+    }});
+
+    qrisCheckoutModal.addEventListener('click', (e) => {{
+      if (e.target === qrisCheckoutModal) {{
+        if (qrisViewPaying.style.display === 'block') {{
+          if (confirm('Tutup tampilan? Verifikasi mutasi QRIS Anda tetap berjalan dan dapat dicek di menu Riwayat.')) {{
+            closeQrisCheckout();
+          }}
+        }} else {{
+          closeQrisCheckout();
+        }}
       }}
     }});
 
@@ -1621,7 +2837,7 @@ def render_html_page() -> str:
       currIdrBtn.classList.add('active');
       currUsdtBtn.classList.remove('active');
       renderProducts();
-      if (selectedProduct) openModal(selectedProduct);
+      if (selectedProduct && modal.classList.contains('open')) openModal(selectedProduct);
     }});
 
     currUsdtBtn.addEventListener('click', () => {{
@@ -1630,11 +2846,12 @@ def render_html_page() -> str:
       currUsdtBtn.classList.add('active');
       currIdrBtn.classList.remove('active');
       renderProducts();
-      if (selectedProduct) openModal(selectedProduct);
+      if (selectedProduct && modal.classList.contains('open')) openModal(selectedProduct);
     }});
 
-    // Deep link open on load (?product=key)
+    // Deep link open on load (?product=key) & check active pending banner
     window.addEventListener('DOMContentLoaded', () => {{
+      updatePendingBanner();
       const params = new URLSearchParams(window.location.search);
       const targetKey = params.get('product') || params.get('buy');
       if (targetKey) {{
@@ -1647,6 +2864,7 @@ def render_html_page() -> str:
 
     // Initial render
     renderProducts();
+    updatePendingBanner();
   </script>
 </body>
 </html>
@@ -1661,6 +2879,24 @@ class WebStoreRequestHandler(BaseHTTPRequestHandler):
         if "favicon.ico" not in str(args[0]):
             logger.info("%s - - [%s] %s", self.client_address[0], self.log_date_time_string(), format % args)
 
+    def _send_json(self, data: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
+        resp = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(resp)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+        self.wfile.write(resp)
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
     def do_HEAD(self) -> None:
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1672,32 +2908,29 @@ class WebStoreRequestHandler(BaseHTTPRequestHandler):
 
         # 1. Healthcheck for Botkeep uptime monitoring
         if path in ("/health", "/ping", "/status"):
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            resp = json.dumps({
+            self._send_json({
                 "status": "ok",
                 "app": "yowes-digital-store",
                 "uptime": time.time(),
                 "bot": _get_bot_username(),
-            }).encode("utf-8")
-            self.wfile.write(resp)
+            })
             return
 
         # 2. JSON API for Products
         if path in ("/api/products", "/api/catalog"):
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
             prods = get_all_products_data()
-            resp = json.dumps({"status": "success", "count": len(prods), "products": prods}, ensure_ascii=False).encode("utf-8")
-            self.wfile.write(resp)
+            self._send_json({"status": "success", "count": len(prods), "products": prods})
             return
 
-        # 3. Main Web App Store Page
-        if path == "/" or path == "/index.html" or path == "/store":
+        # 3. Check Live QRIS Order Status: GET /api/order/status?token=...
+        if path == "/api/order/status":
+            token = parse_qs(parsed.query).get("token", [""])[0]
+            res = get_web_order_status(token)
+            self._send_json(res)
+            return
+
+        # 4. Main Web App Store Page
+        if path in ("/", "/index.html", "/store"):
             try:
                 html_content = render_html_page().encode("utf-8")
                 self.send_response(HTTPStatus.OK)
@@ -1714,11 +2947,42 @@ class WebStoreRequestHandler(BaseHTTPRequestHandler):
                 self.wfile.write(b"Internal Server Error")
                 return
 
-        # 4. Fallback 404
+        # 5. Fallback 404
         self.send_response(HTTPStatus.NOT_FOUND)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
         self.wfile.write(b"Not Found")
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        body_bytes = self.rfile.read(content_length) if content_length > 0 else b""
+        payload: dict[str, Any] = {}
+        if body_bytes:
+            try:
+                payload = json.loads(body_bytes.decode("utf-8"))
+            except Exception:
+                payload = {}
+
+        # 1. Create Web QRIS Order: POST /api/order/create
+        if path == "/api/order/create":
+            prod_key = payload.get("product_key", "").strip()
+            contact = payload.get("contact", "").strip()
+            res = create_web_qris_order(prod_key, contact)
+            self._send_json(res)
+            return
+
+        # 2. Cancel Web QRIS Order: POST /api/order/cancel
+        if path == "/api/order/cancel":
+            token = payload.get("token", "").strip()
+            res = cancel_web_order(token)
+            self._send_json(res)
+            return
+
+        self.send_response(HTTPStatus.NOT_FOUND)
+        self.end_headers()
 
 
 def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_SERVER_PORT) -> None:
@@ -1742,10 +3006,39 @@ def _prodseller_cache_worker() -> None:
         time.sleep(50)
 
 
+def _web_shopeepay_poller_worker() -> None:
+    """Continuously check and auto-settle pending QRIS orders against ShopeePay mutations in the background."""
+    logger.info("⚡ Web Store ShopeePay background mutation worker started")
+    while True:
+        try:
+            import telegram_bot
+            db_func = getattr(telegram_bot, "_db", None)
+            settle_func = getattr(telegram_bot, "_check_and_settle_qris_payment_sync", None)
+            if db_func and settle_func:
+                cutoff = (datetime.now() - timedelta(minutes=16)).isoformat()
+                with db_func() as conn:
+                    pending_rows = conn.execute(
+                        "SELECT id FROM payment_requests WHERE method = 'qris' AND status = 'pending' AND created_at >= ?",
+                        (cutoff,),
+                    ).fetchall()
+                for prow in pending_rows:
+                    pid = prow[0]
+                    try:
+                        settled, msg = settle_func(pid)
+                        if settled:
+                            logger.info("🎉 Web QRIS order #%s auto-settled by background poller!", pid)
+                    except Exception as err:
+                        logger.debug("Error settling order #%s in web poller: %s", pid, err)
+        except Exception as exc:
+            logger.debug("Web ShopeePay poller worker error: %s", exc)
+        time.sleep(8)
+
+
 def start_web_server_thread(host: str = DEFAULT_HOST, port: int | None = None) -> threading.Thread:
     """Start the web server in a daemon background thread (safe for bot concurrent runtime)."""
-    # Start background cache worker to keep stock realtime
+    # Start background workers
     threading.Thread(target=_prodseller_cache_worker, daemon=True, name="ProdSellerWorker").start()
+    threading.Thread(target=_web_shopeepay_poller_worker, daemon=True, name="ShopeePayWebPoller").start()
 
     if port is None:
         port = int(os.getenv("SERVER_PORT") or os.getenv("PORT") or DEFAULT_SERVER_PORT)
@@ -1756,6 +3049,7 @@ def start_web_server_thread(host: str = DEFAULT_HOST, port: int | None = None) -
 
 if __name__ == "__main__":
     threading.Thread(target=_prodseller_cache_worker, daemon=True, name="ProdSellerWorker").start()
+    threading.Thread(target=_web_shopeepay_poller_worker, daemon=True, name="ShopeePayWebPoller").start()
     cli_port = DEFAULT_SERVER_PORT
     if len(sys.argv) > 1:
         try:
