@@ -68,6 +68,7 @@ REQUIRED_CHANNEL = "@canvaproteam04"
 REQUIRED_CHANNEL_URL = "https://t.me/canvaproteam04"
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@TeamPr0_07")
 SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/TeamPr0_07")
+WEB_STORE_URL = os.getenv("WEB_STORE_URL", "https://idasyari.web.id").strip()
 MEDIA_RETENTION_SECONDS = 10 * 60
 MEDIA_CLEANUP_INTERVAL_SECONDS = 60
 _media_cleanup_task: asyncio.Task | None = None
@@ -2070,19 +2071,34 @@ def _get_product_stock_status(key: str) -> bool:
     """Return True if product is in stock (🟢), False if out of stock (🔴)."""
     if key == "docs":
         return True
-    if key == "gemini":
-        if not _prodseller_configured():
-            return (_gemini_stock_count() > 0) or (_setting("gemini_manual_stock", 0) > 0)
+
+    # Ensure live ProdSeller cache is available if configured
+    global _prodseller_products_cache
+    if _prodseller_configured():
         expires_at, cached = _prodseller_products_cache
-        if cached:
-            p_id = os.getenv("PRODSELLER_PRODUCT_ID", "").strip()
-            p_name = os.getenv("PRODSELLER_PRODUCT_NAME", "Gemini Pro").strip().lower()
-            for p in cached:
-                if (p_id and str(p.get("id")) == p_id) or (p_name and p_name in str(p.get("name", "")).lower()):
-                    if p.get("inStock") is False:
-                        return False
-                    stk = p.get("stock")
-                    return stk is None or stk > 0
+        if not cached or time.time() >= expires_at:
+            try:
+                payload = _prodseller_request_sync("GET", "/products")
+                items = payload.get("products", [])
+                if items:
+                    _prodseller_products_cache = (time.time() + 60, items)
+            except Exception as exc:
+                logger.debug("Live stock auto-refresh error: %s", exc)
+
+    if key == "gemini":
+        if _prodseller_configured():
+            expires_at, cached = _prodseller_products_cache
+            if cached:
+                p_id = os.getenv("PRODSELLER_PRODUCT_ID", "").strip()
+                p_name = os.getenv("PRODSELLER_PRODUCT_NAME", "Gemini Pro").strip().lower()
+                for p in cached:
+                    if (p_id and str(p.get("id")) == p_id) or (p_name and p_name in str(p.get("name", "")).lower()):
+                        if p.get("inStock") is False:
+                            return False
+                        stk = p.get("stock")
+                        return stk is None or stk > 0
+            return (_gemini_stock_count() > 0) or (_setting("gemini_manual_stock", 0) > 0)
+
         return (_gemini_stock_count() > 0) or (_setting("gemini_manual_stock", 0) > 0)
 
     if key in _PRODUCT_CATALOG:
@@ -2155,7 +2171,10 @@ def _main_menu_keyboard(update: Update) -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton("🎟️ Redeem Code", callback_data="redeem:input")],
         [InlineKeyboardButton("🌐 Bahasa / Language", callback_data="settings:language")],
-        [InlineKeyboardButton("💬 Hubungi Support" if not english else "💬 Contact Support", url=SUPPORT_URL)],
+        [
+            InlineKeyboardButton("🌐 Web Store" if not english else "🌐 Web Store", url=WEB_STORE_URL),
+            InlineKeyboardButton("💬 Hubungi Support" if not english else "💬 Contact Support", url=SUPPORT_URL),
+        ],
         *([[InlineKeyboardButton("⚙️ Admin Settings", callback_data="admin:menu")]] if _is_admin(update.effective_user.id if update.effective_user else None) else []),
     ]
 
@@ -2264,6 +2283,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_channel_membership(update, context):
         return
     _process_referral(update, context)
+
+    # Deep-linking support (e.g. from Web Store: /start buy_gemini or /start buy_ilovepdf)
+    if context.args and len(context.args) > 0:
+        arg = context.args[0]
+        if arg.startswith("buy_") or arg.startswith("product_"):
+            target_key = arg.split("_", 1)[1]
+            if target_key in _PRODUCT_CATALOG or target_key in ("docs", "gemini"):
+                await show_product(update, context, target_key)
+                return
+
     await show_main_menu(update, context)
 
 
@@ -5174,6 +5203,13 @@ def main() -> None:
 
     app.add_handler(CallbackQueryHandler(handle_dashboard_callback))
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_text_flow))
+
+    # Start Web App Store server for Botkeep domain integration
+    try:
+        from web_store import start_web_server_thread
+        start_web_server_thread()
+    except Exception as exc:
+        logger.warning("Could not launch Web Store server: %s", exc)
 
     logger.info("Starting Yowes Telegram bot")
     app.run_polling(drop_pending_updates=True, timeout=60, bootstrap_retries=-1)
