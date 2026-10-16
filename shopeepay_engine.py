@@ -138,29 +138,57 @@ class ShopeePayClient:
 class UniqueAmountAllocator:
     """Allocates unique amounts (Base Amount + 1..999) to easily
     distinguish simultaneous incoming QRIS transfers without conflict.
+    Includes active reservation tracking and cooldown period to prevent
+    reusing an amount while recent mutations are still in lookback windows.
     """
-    def __init__(self, min_code: int = 1, max_code: int = 999):
+    def __init__(self, min_code: int = 1, max_code: int = 999, cooldown_seconds: int = 7200):
         self.min_code = min_code
         self.max_code = max_code
+        self.cooldown_seconds = cooldown_seconds
         self._active_allocations: Dict[int, float] = {}
+        self._cooldown_allocations: Dict[int, float] = {}
 
-    def allocate(self, base_amount: int, ttl_seconds: int = 900) -> tuple[int, int]:
+    def allocate(
+        self,
+        base_amount: int,
+        ttl_seconds: int = 900,
+        reserved_amounts: Optional[set[int]] = None,
+    ) -> tuple[int, int]:
         self.clean_expired()
         now = time.time()
+        reserved = reserved_amounts or set()
+
         for code in range(self.min_code, self.max_code + 1):
             candidate = base_amount + code
-            if candidate not in self._active_allocations:
-                self._active_allocations[candidate] = now + ttl_seconds
-                return candidate, code
+            if candidate in self._active_allocations:
+                continue
+            if candidate in self._cooldown_allocations:
+                continue
+            if candidate in reserved:
+                continue
+
+            self._active_allocations[candidate] = now + ttl_seconds
+            return candidate, code
+
+        # If all candidates in 1..999 are occupied/cooldown, fallback to code 0
         return base_amount, 0
 
-    def release(self, amount: int) -> None:
+    def release(self, amount: int, into_cooldown: bool = True) -> None:
+        self._active_allocations.pop(amount, None)
+        if into_cooldown:
+            self._cooldown_allocations[amount] = time.time() + self.cooldown_seconds
+
+    def cancel(self, amount: int) -> None:
+        """Cancel allocation without cooldown if cancelled before user payment."""
         self._active_allocations.pop(amount, None)
 
     def clean_expired(self) -> None:
         now = time.time()
         self._active_allocations = {
             amt: exp for amt, exp in self._active_allocations.items() if exp > now
+        }
+        self._cooldown_allocations = {
+            amt: exp for amt, exp in self._cooldown_allocations.items() if exp > now
         }
 
     def cleanup(self) -> None:

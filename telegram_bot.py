@@ -679,6 +679,144 @@ _PRODUCT_CATALOG: dict[str, dict] = {
             "⚠️ Note: Login to browser first before using it on the app."
         ),
     },
+    "ilovepdf": {
+        "emoji": "📄",
+        "label_id": "iLovePdf Premium 1Y",
+        "label_en": "iLovePdf Premium 1Y",
+        "price_coins_key": "ilovepdf_price",
+        "price_idr_key": "ilovepdf_price_idr",
+        "price_qris_key": "ilovepdf_qris_price_idr",
+        "price_binance_key": "ilovepdf_binance_price_usdt",
+        "default_coins": 25,
+        "default_idr": 14000,
+        "default_qris_idr": 14000,
+        "default_binance_usdt": "0.85",
+        "markup_usdt": 0.5,
+        "prodseller_default_id": "6a6207cf92969197bb382958",
+        "prodseller_id_env": "PRODSELLER_ILOVEPDF_ID",
+        "prodseller_name_env": "PRODSELLER_ILOVEPDF_NAME",
+        "prodseller_default": "iLovePdf Premium 1Yr",
+        "stock_key": "ilovepdf_manual_stock",
+        "info_key": "ilovepdf_info",
+        "default_info_id": (
+            "🔻 Full access to all iLovePDF tools\n"
+            "🔻 Unlimited document processing\n"
+            "🔻 Access across Web, Mobile, and Desktop\n"
+            "🔻 Digital Signatures & Ad-free experience\n"
+            "🔻 Regional file processing & 2000 AI Credits\n"
+            "✅ Diberikan Akun email:pass iLovePdf\n"
+            "⚡️ Login ke website iLovePdf dengan email:pass lalu ganti password akun."
+        ),
+        "default_info_en": (
+            "🔻 Full access to all iLovePDF tools\n"
+            "🔻 Unlimited document processing\n"
+            "🔻 Access across Web, Mobile, and Desktop\n"
+            "🔻 Digital Signatures & Ad-free experience\n"
+            "🔻 Regional file processing & 2000 AI Credits\n"
+            "✅ You are given email:pass of iLovePdf\n"
+            "⚡️ Login to iLovePdf website with email:pass given and change password of account."
+        ),
+    },
+    "outlook": {
+        "emoji": "✉️",
+        "label_id": "Emails Outlook/Hotmail",
+        "label_en": "Emails Outlook/Hotmail",
+        "price_coins_key": "outlook_price",
+        "price_idr_key": "outlook_price_idr",
+        "price_qris_key": "outlook_qris_price_idr",
+        "price_binance_key": "outlook_binance_price_usdt",
+        "default_coins": 15,
+        "default_idr": 8000,
+        "default_qris_idr": 8000,
+        "default_binance_usdt": "0.52",
+        "markup_usdt": 0.5,
+        "prodseller_default_id": "6a2ff705dbe65bbecc0d3d9d",
+        "prodseller_id_env": "PRODSELLER_OUTLOOK_ID",
+        "prodseller_name_env": "PRODSELLER_OUTLOOK_NAME",
+        "prodseller_default": " Emails Outlook/hotmail",
+        "stock_key": "outlook_manual_stock",
+        "info_key": "outlook_info",
+        "default_info_id": (
+            "Full email Access + OTP\n"
+            "Format : email|password|token\n"
+            "OTP link : https://dongvanfb.net/read_mail_box/"
+        ),
+        "default_info_en": (
+            "Full email Access + OTP\n"
+            "Format : email|password|token\n"
+            "OTP link : https://dongvanfb.net/read_mail_box/"
+        ),
+    },
+    "appletv": {
+        "emoji": "🍏",
+        "label_id": "Apple TV 12M Link",
+        "label_en": "Apple TV 12M Link",
+        "price_coins_key": "appletv_price",
+        "price_idr_key": "appletv_price_idr",
+        "price_qris_key": "appletv_qris_price_idr",
+        "price_binance_key": "appletv_binance_price_usdt",
+        "default_coins": 40,
+        "default_idr": 31000,
+        "default_qris_idr": 31000,
+        "default_binance_usdt": "1.90",
+        "markup_usdt": 0.5,
+        "prodseller_default_id": "6abeace70dbb401865ffb2d2",
+        "prodseller_id_env": "PRODSELLER_APPLETV_ID",
+        "prodseller_name_env": "PRODSELLER_APPLETV_NAME",
+        "prodseller_default": "Apple TV 12 Months Link",
+        "stock_key": "appletv_manual_stock",
+        "info_key": "appletv_info",
+        "default_info_id": (
+            "📺 APPLE TV 12M ACTIVATION LINK\n\n"
+            "🎁 48 HOURS HOLD WARRANTY\n"
+            "🍏 SIMPLE AS GEMINI/DUOLINGO LINKS\n"
+            "NO CARD/PAYMENT METHOD REQUIRED ✅\n\n"
+            "📱 ACTIVATION PROCESS:\n"
+            "GO TO APPLE TV WEBSITE AND CREATE AN ACCOUNT USING USA VPN, PASTE LINK AND ACTIVATE SUBSCRIPTION.\n"
+            "NO VPN NEEDED AFTER ACTIVATING SUBSCRIPTION.\n"
+            "ℹ️ NO WARRANTY AFTER ACTIVATION"
+        ),
+        "default_info_en": (
+            "📺 APPLE TV 12M ACTIVATION LINK\n\n"
+            "🎁 48 HOURS HOLD WARRANTY\n"
+            "🍏 SIMPLE AS GEMINI/DUOLINGO LINKS\n"
+            "NO CARD/PAYMENT METHOD REQUIRED ✅\n\n"
+            "📱 ACTIVATION PROCESS:\n"
+            "GO TO APPLE TV WEBSITE AND CREATE AN ACCOUNT USING USA VPN, PASTE LINK AND ACTIVATE SUBSCRIPTION.\n"
+            "NO VPN NEEDED AFTER ACTIVATING SUBSCRIPTION.\n"
+            "ℹ️ NO WARRANTY AFTER ACTIVATION"
+        ),
+    },
+    "adobe_express": {
+        "emoji": "⚡",
+        "label_id": "Adobe Express 12M",
+        "label_en": "Adobe Express 12M",
+        "price_coins_key": "adobe_express_price",
+        "price_idr_key": "adobe_express_price_idr",
+        "price_qris_key": "adobe_express_qris_price_idr",
+        "price_binance_key": "adobe_express_binance_price_usdt",
+        "default_coins": 20,
+        "default_idr": 12000,
+        "default_qris_idr": 12000,
+        "default_binance_usdt": "0.75",
+        "markup_usdt": 0.5,
+        "prodseller_default_id": "6a5b873847b606c66fc160b2",
+        "prodseller_id_env": "PRODSELLER_ADOBE_EXPRESS_ID",
+        "prodseller_name_env": "PRODSELLER_ADOBE_EXPRESS_NAME",
+        "prodseller_default": "Adobe Express 12M",
+        "stock_key": "adobe_express_manual_stock",
+        "info_key": "adobe_express_info",
+        "default_info_id": (
+            "- You will receive a redeem link, open it and login with your email you will upgraded instantly to Premium member of adobe express for 12 months.\n"
+            "- No VPN, No VISA or payment required, simple as 1+1=2\n"
+            "⚠️ If you encounter a region restriction or region mismatch error, connect to an Indian VPN and try again."
+        ),
+        "default_info_en": (
+            "- You will receive a redeem link, open it and login with your email you will upgraded instantly to Premium member of adobe express for 12 months.\n"
+            "- No VPN, No VISA or payment required, simple as 1+1=2\n"
+            "⚠️ If you encounter a region restriction or region mismatch error, connect to an Indian VPN and try again."
+        ),
+    },
 }
 
 
@@ -800,6 +938,13 @@ def init_database() -> None:
                 reviewed_at TEXT,
                 reviewed_by INTEGER
             );
+            CREATE TABLE IF NOT EXISTS settled_shopee_transactions (
+                transaction_id TEXT PRIMARY KEY,
+                payment_id INTEGER,
+                amount INTEGER,
+                tx_time INTEGER,
+                settled_at TEXT
+            );
             """
         )
         catalog_settings_defaults = []
@@ -811,6 +956,7 @@ def init_database() -> None:
                 (c_cfg["price_binance_key"], str(c_cfg["default_binance_usdt"])),
                 (c_cfg["stock_key"], "0"),
                 (c_cfg["info_key"], ""),
+                (f"active_{c_key}", "1"),
             ])
 
         connection.executemany(
@@ -825,6 +971,8 @@ def init_database() -> None:
                 ("referral_reward", "2"),
                 ("gemini_manual_stock", "0"),
                 ("gemini_info", ""),
+                ("active_docs", "1"),
+                ("active_gemini", "1"),
             ] + catalog_settings_defaults,
         )
 
@@ -851,12 +999,20 @@ def init_database() -> None:
             ("qris_payload", "TEXT DEFAULT ''"),
             ("auto_settled", "INTEGER DEFAULT 0"),
             ("delivered_data", "TEXT DEFAULT ''"),
+            ("shopee_tx_id", "TEXT DEFAULT NULL"),
         ):
             try:
                 connection.execute(f"ALTER TABLE payment_requests ADD COLUMN {column} {definition}")
             except sqlite3.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():
                     raise
+
+        # Pre-seed already settled past transaction IDs to never allow reuse
+        for past_tx_id in ("142440650217903282", "160602852084275760"):
+            connection.execute(
+                "INSERT OR IGNORE INTO settled_shopee_transactions (transaction_id, payment_id, amount, tx_time, settled_at) VALUES (?, 0, 0, 0, CURRENT_TIMESTAMP)",
+                (past_tx_id,),
+            )
 
 
 def _admin_ids() -> set[int]:
@@ -1224,7 +1380,26 @@ async def _show_dynamic_qris_instruction(
         return False
 
     try:
-        unique_amount, unique_code = _amount_allocator.allocate(base_price)
+        now_dt = datetime.now()
+        pending_cutoff = (now_dt - timedelta(minutes=16)).isoformat()
+        cooldown_cutoff = (now_dt - timedelta(hours=2)).isoformat()
+        reserved_amounts = set()
+        with _db() as connection:
+            rows = connection.execute(
+                """
+                SELECT raw_amount FROM payment_requests
+                WHERE method = 'qris' AND raw_amount > 0 AND (
+                    (status = 'pending' AND created_at >= ?) OR
+                    (status = 'approved' AND reviewed_at >= ?)
+                )
+                """,
+                (pending_cutoff, cooldown_cutoff),
+            ).fetchall()
+            for r in rows:
+                if r["raw_amount"]:
+                    reserved_amounts.add(int(r["raw_amount"]))
+
+        unique_amount, unique_code = _amount_allocator.allocate(base_price, reserved_amounts=reserved_amounts)
         dyn_payload = qris_engine.static_to_dynamic_qris(_shopee_qris_raw, unique_amount)
         qr_url = qris_engine.get_qris_qr_image_url(dyn_payload, size=450)
     except Exception as exc:
@@ -1929,6 +2104,11 @@ def _get_product_stock_status(key: str) -> bool:
     return True
 
 
+def _is_product_active(key: str) -> bool:
+    """Return True if product is set as active/displayed by admin, False if hidden."""
+    return _setting(f"active_{key}", 1) == 1
+
+
 def _main_menu_keyboard(update: Update) -> InlineKeyboardMarkup:
     english = _language(update) == "en"
     doc_price = _setting("doc_price", 3)
@@ -1939,16 +2119,19 @@ def _main_menu_keyboard(update: Update) -> InlineKeyboardMarkup:
 
     gemini_dot = "🟢" if _get_product_stock_status("gemini") else "🔴"
 
-    product_buttons = [
-        [InlineKeyboardButton(f"🎓 Canva Doc Education · {doc_price} 🪙 · 🟢", callback_data="product:docs")],
-        [InlineKeyboardButton(
+    product_buttons = []
+    if _is_product_active("docs"):
+        product_buttons.append([InlineKeyboardButton(f"🎓 Canva Doc Education · {doc_price} 🪙 · 🟢", callback_data="product:docs")])
+    if _is_product_active("gemini"):
+        product_buttons.append([InlineKeyboardButton(
             f"✨ Gemini Pro 18 Bulan · {gemini_price} · {gemini_dot}" if not english
             else f"✨ Gemini Pro 18 Months · {gemini_price} · {gemini_dot}",
             callback_data="product:gemini",
-        )],
-    ]
+        )])
 
     for key, cfg in _PRODUCT_CATALOG.items():
+        if not _is_product_active(key):
+            continue
         price_idr, price_usdt = _get_catalog_product_price(key)
         price_str = f"{price_usdt} USDT" if english else _format_idr(price_idr)
         stock_dot = "🟢" if _get_product_stock_status(key) else "🔴"
@@ -2367,13 +2550,16 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ref_r = _setting("referral_reward", 2)
     gemini_p = _format_idr(_setting("gemini_price_idr", 20000))
     gemini_u = _setting_text("gemini_binance_price_usdt", "0.60")
-    prod_lines_en = [f"• ✨ Gemini Pro: *{gemini_u} USDT* ({gemini_p})"]
-    prod_lines_id = [f"• ✨ Gemini Pro: *{gemini_p}* ({gemini_u} USDT)"]
+    docs_act_tag = "🟢" if _is_product_active("docs") else "🔴"
+    gem_act_tag = "🟢" if _is_product_active("gemini") else "🔴"
+    prod_lines_en = [f"• {gem_act_tag} ✨ Gemini Pro: *{gemini_u} USDT* ({gemini_p})"]
+    prod_lines_id = [f"• {gem_act_tag} ✨ Gemini Pro: *{gemini_p}* ({gemini_u} USDT)"]
     for c_key, c_cfg in _PRODUCT_CATALOG.items():
         p_idr, p_usdt = _get_catalog_product_price(c_key)
         p_idr_fmt = _format_idr(p_idr)
-        prod_lines_en.append(f"• {c_cfg['emoji']} {c_cfg['label_en']}: *{p_usdt} USDT* ({p_idr_fmt})")
-        prod_lines_id.append(f"• {c_cfg['emoji']} {c_cfg['label_id']}: *{p_idr_fmt}* ({p_usdt} USDT)")
+        act_tag = "🟢" if _is_product_active(c_key) else "🔴"
+        prod_lines_en.append(f"• {act_tag} {c_cfg['emoji']} {c_cfg['label_en']}: *{p_usdt} USDT* ({p_idr_fmt})")
+        prod_lines_id.append(f"• {act_tag} {c_cfg['emoji']} {c_cfg['label_id']}: *{p_idr_fmt}* ({p_usdt} USDT)")
 
     prod_text_en = "\n".join(prod_lines_en)
     prod_text_id = "\n".join(prod_lines_id)
@@ -2381,21 +2567,21 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if _is_english(update):
         text = (
             f"*Admin Dashboard*\n\n"
-            f"🎓 *Canva Education:*\n"
+            f"🎓 *Canva Education:* [{docs_act_tag}]\n"
             f"• Doc Price: *{doc_p} 🪙*\n"
             f"• Daily Check-in: *{checkin_r} 🪙*\n"
             f"• Referral Reward: *{ref_r} 🪙*\n\n"
-            f"🛍️ *Digital Products (USDT / IDR):*\n"
+            f"🛍️ *Digital Products (USDT / IDR) [🟢 Active / 🔴 Inactive]:*\n"
             f"{prod_text_en}"
         )
     else:
         text = (
             f"*Admin Dashboard*\n\n"
-            f"🎓 *Canva Education:*\n"
+            f"🎓 *Canva Education:* [{docs_act_tag}]\n"
             f"• Harga Dokumen: *{doc_p} 🪙*\n"
             f"• Reward Check-in: *{checkin_r} 🪙*\n"
             f"• Reward Referral: *{ref_r} 🪙*\n\n"
-            f"🛍️ *Harga Produk Digital (Rupiah / USDT):*\n"
+            f"🛍️ *Harga Produk Digital (Rupiah / USDT) [🟢 Aktif / 🔴 Nonaktif]:*\n"
             f"{prod_text_id}"
         )
     keyboard = InlineKeyboardMarkup(
@@ -2418,6 +2604,7 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             ],
             [
                 InlineKeyboardButton("💳 Provider Balance" if _is_english(update) else "💳 Saldo Provider", callback_data="admin:provider_balance"),
+                InlineKeyboardButton("🎛️ Status Produk" if _is_english(update) else "🎛️ Status Produk", callback_data="admin:visibility"),
             ],
             [
                 InlineKeyboardButton("⬅️ Back" if _is_english(update) else "⬅️ Kembali", callback_data="menu:main"),
@@ -2568,6 +2755,15 @@ async def show_provider_balance(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def show_product(update: Update, context: ContextTypes.DEFAULT_TYPE, product: str) -> None:
+    if not _is_product_active(product) and not _is_admin(update.effective_user.id if update.effective_user else None):
+        msg = (
+            "This product is currently disabled or unavailable."
+            if _is_english(update) else
+            "Produk ini sedang dinonaktifkan atau tidak tersedia. Silakan pilih produk lainnya."
+        )
+        await _safe_edit_text(update, msg, reply_markup=_back_keyboard("menu:main"))
+        return
+
     if product == "docs":
         context.user_data["product"] = "docs"
         await start_wizard(update, context, edit=True)
@@ -3105,47 +3301,164 @@ async def _notify_admins_auto_paid(
             logger.info("Could not notify admin %s of auto payment: %s", admin_id, exc)
 
 
+def _get_settled_shopee_tx_ids() -> set[str]:
+    """Retrieve all ShopeePay transaction IDs that have already been settled/consumed."""
+    tx_ids: set[str] = set()
+    try:
+        with _db() as connection:
+            rows = connection.execute(
+                """
+                SELECT transaction_id FROM settled_shopee_transactions WHERE transaction_id IS NOT NULL AND transaction_id != ''
+                UNION
+                SELECT shopee_tx_id FROM payment_requests WHERE shopee_tx_id IS NOT NULL AND shopee_tx_id != ''
+                """
+            ).fetchall()
+            for r in rows:
+                if r[0]:
+                    tx_ids.add(str(r[0]).strip())
+    except Exception as exc:
+        logger.warning("Error fetching settled ShopeePay transaction IDs: %s", exc)
+    return tx_ids
+
+
+def _find_matching_shopee_tx(
+    payment: dict,
+    recent_txs: list[dict],
+    settled_tx_ids: set[str],
+) -> dict | None:
+    """Find a valid, unconsumed ShopeePay transaction matching the specific payment request.
+
+    Guarantees:
+    - Amount matches exact integer value
+    - Status is completed / success (status 3)
+    - Transaction ID has never been settled previously
+    - Transaction timestamp occurred strictly within the payment's active lifecycle (created_at - 45s .. created_at + 17m)
+    """
+    target_amount = payment.get("raw_amount") or 0
+    if target_amount <= 0:
+        return None
+
+    try:
+        created_dt = datetime.fromisoformat(payment["created_at"])
+        payment_ts = int(created_dt.timestamp())
+    except Exception:
+        payment_ts = 0
+
+    # 45s clock skew tolerance before payment created
+    min_tx_time = payment_ts - 45 if payment_ts > 0 else 0
+    # 17 minutes maximum validity after payment created
+    max_tx_time = payment_ts + 1020 if payment_ts > 0 else int(time.time()) + 3600
+
+    for tx in recent_txs:
+        tx_id = str(tx.get("id") or tx.get("transactionId") or tx.get("raw", {}).get("transactionId") or "").strip()
+        if not tx_id or tx_id in settled_tx_ids:
+            continue
+
+        tx_amount = shopeepay_engine.parse_shopee_amount(tx.get("amount", 0))
+        if tx_amount != target_amount:
+            continue
+
+        tx_status = tx.get("status")
+        # Status 3 represents COMPLETED_STATUS
+        if tx_status not in (3, "3", "SUCCESS", "COMPLETED"):
+            continue
+
+        tx_time = int(tx.get("create_time") or tx.get("raw", {}).get("createTime") or 0)
+        # Verify transaction time falls within this payment's creation and expiration window
+        if payment_ts > 0 and (tx_time < min_tx_time or tx_time > max_tx_time):
+            continue
+
+        return tx
+
+    return None
+
+
+def _claim_and_record_settlement(payment_id: int, tx: dict) -> bool:
+    """Atomically record ShopeePay transaction claim for a payment request to prevent double-spending."""
+    tx_id = str(tx.get("id") or tx.get("transactionId") or tx.get("raw", {}).get("transactionId") or "").strip()
+    if not tx_id:
+        return False
+    tx_amount = shopeepay_engine.parse_shopee_amount(tx.get("amount", 0))
+    tx_time = int(tx.get("create_time") or tx.get("raw", {}).get("createTime") or 0)
+
+    with _db() as connection:
+        row = connection.execute("SELECT status FROM payment_requests WHERE id = ?", (payment_id,)).fetchone()
+        if not row or row["status"] != "pending":
+            return False
+
+        existing = connection.execute(
+            "SELECT 1 FROM settled_shopee_transactions WHERE transaction_id = ?", (tx_id,)
+        ).fetchone()
+        if existing:
+            return False
+
+        try:
+            connection.execute(
+                """
+                INSERT INTO settled_shopee_transactions (transaction_id, payment_id, amount, tx_time, settled_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (tx_id, payment_id, tx_amount, tx_time, datetime.now().isoformat()),
+            )
+            connection.execute(
+                """
+                UPDATE payment_requests
+                SET auto_settled = 1,
+                    shopee_tx_id = ?
+                WHERE id = ? AND status = 'pending'
+                """,
+                (tx_id, payment_id),
+            )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
 async def _check_and_settle_qris_payment(
     context: ContextTypes.DEFAULT_TYPE | Any,
     payment_id: int,
 ) -> tuple[bool, str]:
     """Check ShopeePay mutations for a specific pending dynamic QRIS payment and fulfill if matched."""
     with _db() as connection:
-        payment = connection.execute(
+        row = connection.execute(
             "SELECT * FROM payment_requests WHERE id = ?", (payment_id,)
         ).fetchone()
-    if not payment:
+    if not row:
         return False, "Transaksi tidak ditemukan."
+    payment = dict(row)
     if payment["status"] == "approved":
         return True, "Pembayaran sudah terverifikasi dan pesanan telah dikirim."
+    if payment["status"] in ("expired", "cancelled", "rejected"):
+        return False, f"Pesanan berstatus {payment['status']}. Silakan buat pesanan baru."
 
-    target_amount = payment["raw_amount"]
+    target_amount = payment.get("raw_amount") or 0
     if not target_amount or target_amount <= 0:
         return False, "Bukan pembayaran QRIS dinamis otomatis."
 
     try:
-        recent_txs = await _shopeepay_client.fetch_recent_transactions(1800)
+        recent_txs = await _shopeepay_client.fetch_recent_transactions(30)
     except Exception as exc:
         logger.warning("Error fetching ShopeePay transactions: %s", exc)
         return False, f"Gagal mengecek mutasi: {exc}"
 
-    matched = False
-    for tx in recent_txs:
-        tx_amount = shopeepay_engine.parse_shopee_amount(tx.get("amount", 0))
-        tx_status = tx.get("status")
-        # Status 3 represents COMPLETED_STATUS
-        if tx_amount == target_amount and tx_status in (3, "3", "SUCCESS", "COMPLETED"):
-            matched = True
-            break
+    settled_tx_ids = _get_settled_shopee_tx_ids()
+    matched_tx = _find_matching_shopee_tx(payment, recent_txs, settled_tx_ids)
 
-    if not matched:
+    if not matched_tx:
         return False, f"Pembayaran {_format_idr(target_amount)} belum terdeteksi di mutasi ShopeePay. Pastikan Anda telah mentransfer nominal persis dan tunggu 10-30 detik."
+
+    # Atomically claim transaction
+    claimed = _claim_and_record_settlement(payment_id, matched_tx)
+    if not claimed:
+        with _db() as connection:
+            chk = connection.execute("SELECT status FROM payment_requests WHERE id = ?", (payment_id,)).fetchone()
+            if chk and chk["status"] == "approved":
+                return True, "Pembayaran sudah terverifikasi."
+        return False, "Transaksi mutasi ini sudah digunakan untuk pesanan lain atau telah diproses."
 
     ok, fulfill_msg = await _fulfill_payment_request(context, payment_id)
     if ok:
-        with _db() as connection:
-            connection.execute("UPDATE payment_requests SET auto_settled = 1 WHERE id = ?", (payment_id,))
-        _amount_allocator.release(target_amount)
+        _amount_allocator.release(target_amount, into_cooldown=True)
         await _notify_admins_auto_paid(context, payment_id, target_amount)
         return True, "Sukses"
     return False, fulfill_msg
@@ -3174,7 +3487,7 @@ async def _shopeepay_mutation_poller(application) -> None:
 
             for exp_p in expired_payments:
                 if exp_p["raw_amount"]:
-                    _amount_allocator.release(exp_p["raw_amount"])
+                    _amount_allocator.cancel(exp_p["raw_amount"])
                 logger.info("Auto-expired pending QRIS payment #%s (amount: %s)", exp_p["id"], exp_p["amount"])
                 exp_text = (
                     f"⏱ <b>Batas Waktu Pembayaran Berakhir</b>\n\n"
@@ -3191,37 +3504,38 @@ async def _shopeepay_mutation_poller(application) -> None:
 
             # 2. Check active pending QRIS orders within the 15-minute window
             with _db() as connection:
-                pending_payments = connection.execute(
+                rows = connection.execute(
                     "SELECT * FROM payment_requests WHERE method = 'qris' AND status = 'pending' AND raw_amount > 0 AND created_at >= ?",
                     (expire_cutoff,),
                 ).fetchall()
+                pending_payments = [dict(r) for r in rows]
 
             if not pending_payments:
                 continue
 
-            recent_txs = await _shopeepay_client.fetch_recent_transactions(1800)
+            recent_txs = await _shopeepay_client.fetch_recent_transactions(30)
             if not recent_txs:
                 continue
+
+            settled_tx_ids = _get_settled_shopee_tx_ids()
 
             for payment in pending_payments:
                 p_id = payment["id"]
                 target_amount = payment["raw_amount"]
-                matched = False
-                for tx in recent_txs:
-                    tx_amount = shopeepay_engine.parse_shopee_amount(tx.get("amount", 0))
-                    tx_status = tx.get("status")
-                    if tx_amount == target_amount and tx_status in (3, "3", "SUCCESS", "COMPLETED"):
-                        matched = True
-                        break
+                matched_tx = _find_matching_shopee_tx(payment, recent_txs, settled_tx_ids)
 
-                if matched:
-                    logger.info("ShopeePay poller matched payment #%s for amount %s", p_id, target_amount)
-                    ok, _ = await _fulfill_payment_request(application, p_id)
-                    if ok:
-                        with _db() as connection:
-                            connection.execute("UPDATE payment_requests SET auto_settled = 1 WHERE id = ?", (p_id,))
-                        _amount_allocator.release(target_amount)
-                        await _notify_admins_auto_paid(application, p_id, target_amount)
+                if matched_tx:
+                    logger.info("ShopeePay poller matched payment #%s for amount %s (tx: %s)", p_id, target_amount, matched_tx.get("id"))
+                    claimed = _claim_and_record_settlement(p_id, matched_tx)
+                    if claimed:
+                        tx_id_str = str(matched_tx.get("id") or matched_tx.get("transactionId") or "")
+                        if tx_id_str:
+                            settled_tx_ids.add(tx_id_str)
+
+                        ok, _ = await _fulfill_payment_request(application, p_id)
+                        if ok:
+                            _amount_allocator.release(target_amount, into_cooldown=True)
+                            await _notify_admins_auto_paid(application, p_id, target_amount)
 
         except asyncio.CancelledError:
             break
@@ -3261,7 +3575,7 @@ async def _handle_cancel_payment(update: Update, context: ContextTypes.DEFAULT_T
         )
 
     if payment["raw_amount"]:
-        _amount_allocator.release(payment["raw_amount"])
+        _amount_allocator.cancel(payment["raw_amount"])
 
     context.user_data.pop("current_qris_payment_id", None)
     context.user_data.pop("step", None)
@@ -3661,6 +3975,107 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
             parse_mode="Markdown",
             reply_markup=_back_keyboard("admin:menu"),
         )
+    if data == "admin:visibility":
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
+            return
+        english = _is_english(update)
+        text = (
+            "*🎛️ Product Visibility Settings*\n\n"
+            "Click any product below to toggle its status:\n"
+            "🟢 *Active* (Visible to customers on the menu)\n"
+            "🔴 *Inactive* (Hidden from customers on the menu)\n\n"
+            "💡 _Use this when a product is temporarily or permanently out of stock so customers cannot order it._"
+            if english else
+            "*🎛️ Pengaturan Status Tampilan Produk*\n\n"
+            "Klik produk di bawah untuk mengubah statusnya:\n"
+            "🟢 *Aktif* (Ditampilkan ke pengguna di menu utama)\n"
+            "🔴 *Nonaktif* (Disembunyikan dari menu pengguna)\n\n"
+            "💡 _Gunakan fitur ini ketika produk sedang kehabisan stok agar pengguna tidak dapat memesannya._"
+        )
+        buttons = []
+        docs_act = _is_product_active("docs")
+        docs_icon = "🟢" if docs_act else "🔴"
+        buttons.append([InlineKeyboardButton(f"{docs_icon} 🎓 Canva Doc Education", callback_data="admin:toggle_vis:docs")])
+
+        gem_act = _is_product_active("gemini")
+        gem_icon = "🟢" if gem_act else "🔴"
+        buttons.append([InlineKeyboardButton(f"{gem_icon} ✨ Gemini Pro", callback_data="admin:toggle_vis:gemini")])
+
+        for c_key, c_cfg in _PRODUCT_CATALOG.items():
+            is_act = _is_product_active(c_key)
+            icon = "🟢" if is_act else "🔴"
+            c_label = c_cfg["label_en"] if english else c_cfg["label_id"]
+            buttons.append([InlineKeyboardButton(f"{icon} {c_cfg['emoji']} {c_label}", callback_data=f"admin:toggle_vis:{c_key}")])
+
+        buttons.append([InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="admin:menu")])
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
+        return
+
+    if data.startswith("admin:toggle_vis:"):
+        if not _is_admin(update.effective_user.id if update.effective_user else None):
+            await _safe_edit_text(update, "Akses ditolak.", reply_markup=_back_keyboard("admin:menu"))
+            return
+        key = data.split(":", 2)[2]
+        curr = _setting(f"active_{key}", 1)
+        new_val = 0 if curr == 1 else 1
+        with _db() as connection:
+            connection.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (f"active_{key}", str(new_val)),
+            )
+
+        if key == "docs":
+            prod_name = "🎓 Canva Doc Education"
+        elif key == "gemini":
+            prod_name = "✨ Gemini Pro"
+        elif key in _PRODUCT_CATALOG:
+            c_cfg = _PRODUCT_CATALOG[key]
+            prod_name = f"{c_cfg['emoji']} {c_cfg['label_id']}"
+        else:
+            prod_name = key
+
+        status_str = "🟢 Aktif (Ditampilkan)" if new_val == 1 else "🔴 Nonaktif (Disembunyikan)"
+        if _is_english(update):
+            status_str = "🟢 Active (Visible)" if new_val == 1 else "🔴 Inactive (Hidden)"
+
+        if query:
+            try:
+                await query.answer(f"{prod_name} -> {status_str}", show_alert=False)
+            except TelegramError:
+                pass
+
+        english = _is_english(update)
+        text = (
+            "*🎛️ Product Visibility Settings*\n\n"
+            "Click any product below to toggle its status:\n"
+            "🟢 *Active* (Visible to customers on the menu)\n"
+            "🔴 *Inactive* (Hidden from customers on the menu)\n\n"
+            "💡 _Use this when a product is temporarily or permanently out of stock so customers cannot order it._"
+            if english else
+            "*🎛️ Pengaturan Status Tampilan Produk*\n\n"
+            "Klik produk di bawah untuk mengubah statusnya:\n"
+            "🟢 *Aktif* (Ditampilkan ke pengguna di menu utama)\n"
+            "🔴 *Nonaktif* (Disembunyikan dari menu pengguna)\n\n"
+            "💡 _Gunakan fitur ini ketika produk sedang kehabisan stok agar pengguna tidak dapat memesannya._"
+        )
+        buttons = []
+        docs_act = _is_product_active("docs")
+        docs_icon = "🟢" if docs_act else "🔴"
+        buttons.append([InlineKeyboardButton(f"{docs_icon} 🎓 Canva Doc Education", callback_data="admin:toggle_vis:docs")])
+
+        gem_act = _is_product_active("gemini")
+        gem_icon = "🟢" if gem_act else "🔴"
+        buttons.append([InlineKeyboardButton(f"{gem_icon} ✨ Gemini Pro", callback_data="admin:toggle_vis:gemini")])
+
+        for c_key, c_cfg in _PRODUCT_CATALOG.items():
+            is_act = _is_product_active(c_key)
+            icon = "🟢" if is_act else "🔴"
+            c_label = c_cfg["label_en"] if english else c_cfg["label_id"]
+            buttons.append([InlineKeyboardButton(f"{icon} {c_cfg['emoji']} {c_label}", callback_data=f"admin:toggle_vis:{c_key}")])
+
+        buttons.append([InlineKeyboardButton("⬅️ Back" if english else "⬅️ Kembali", callback_data="admin:menu")])
+        await _safe_edit_text(update, text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
         return
 
     if data in {"admin:product_prices", "admin:gemini_prices"}:
