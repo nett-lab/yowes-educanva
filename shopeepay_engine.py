@@ -50,6 +50,8 @@ class ShopeePayClient:
         self.token = token or os.getenv("SHOPEE_MERCHANT_TOKEN", "").strip()
         self.merchant_id = merchant_id or os.getenv("SHOPEE_MERCHANT_ID", "").strip()
         self.store_id = store_id or os.getenv("SHOPEE_STORE_ID", "").strip()
+        self.is_session_expired: bool = False
+        self._last_auth_error_ts: float = 0.0
 
     @property
     def is_configured(self) -> bool:
@@ -125,7 +127,22 @@ class ShopeePayClient:
                             })
                         return parsed_txs
                     else:
-                        logger.warning("ShopeePay response error: %s", data)
+                        code = data.get("code")
+                        msg = data.get("msg", "")
+                        if code == 200020 or "login timeout" in str(msg).lower():
+                            self.is_session_expired = True
+                            now = time.time()
+                            if now - getattr(self, "_last_auth_error_ts", 0.0) > 300:
+                                self._last_auth_error_ts = now
+                                logger.warning(
+                                    "⚠️ ShopeePay session expired (%s: '%s'). Perbarui SHOPEE_MERCHANT_COOKIE & SHOPEE_MERCHANT_TOKEN di .env.",
+                                    code,
+                                    msg,
+                                )
+                            else:
+                                logger.debug("ShopeePay session expired (suppressed): %s", data)
+                        else:
+                            logger.warning("ShopeePay response error: %s", data)
                         return []
                 else:
                     logger.warning("ShopeePay poll returned HTTP %s", res.status_code)

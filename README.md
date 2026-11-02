@@ -360,16 +360,14 @@ generate - Generate documents with the quick command format
 
 When `PRODSELLER_API_KEY` is configured, the bot integrates seamlessly with the ProdSeller API (`https://prodseller.com/v1`):
 
-- **Products Available**:
-  - ✨ **Gemini Pro 18 Bulan**: `PRODSELLER_PRODUCT_ID` / `PRODSELLER_PRODUCT_NAME` (Default: `Gemini Pro`)
-  - 🎥 **CapCut Pro**: `PRODSELLER_CAPCUT_ID` / `PRODSELLER_CAPCUT_NAME` (Default: `CapCut`)
-  - 🤖 **Claude API**: `PRODSELLER_CLAUDE_ID` / `PRODSELLER_CLAUDE_NAME` (Default: `Claude`)
-  - 💻 **GPT Codex**: `PRODSELLER_CODEX_ID` / `PRODSELLER_CODEX_NAME` (Default: `GPT Codex`)
-  - 📺 **Prime Video**: `PRODSELLER_PRIMEVIDEO_ID` / `PRODSELLER_PRIMEVIDEO_NAME` (Default: `Prime Video`)
-- **Product Info**: Each product automatically displays the live `description` from the ProdSeller API (`GET /v1/products`) in the purchase chat. Admins can also configure a custom info override or rely on built-in curated default specifications if ProdSeller description is empty.
-- **Stock & Orders**: Real-time stock status from ProdSeller (`inStock` & `stock`), orders created via `POST /v1/orders` with idempotency protection, and instant key/link delivery.
-- **Payment Options**: Binance USDT transfer and QRIS IDR with admin receipt verification (coins are exclusively reserved for Canva Education document generation).
-- **Fallback Mode**: If `PRODSELLER_API_KEY` is not set, all products fallback to local stock and manual admin review without breaking the bot.
+- **Dynamic Auto-Synchronization**:
+  - **Otomatis Menambahkan Produk Baru**: Semua produk aktif di ProdSeller otomatis disinkronkan dan muncul di Web Store maupun Bot Telegram tanpa perlu konfigurasi manual satu per satu.
+  - **Markup Harga Otomatis (+0.5 USDT)**: Harga jual dihitung otomatis dari harga provider ProdSeller + markup 0.5 USDT, serta otomatis dikonversi ke Rupiah (IDR) untuk pembayaran QRIS.
+  - **Auto-Removal**: Produk yang sudah dihapus atau tidak lagi tersedia di ProdSeller akan secara otomatis dibersihkan dan dihapus dari katalog Web Store dan Bot Telegram.
+  - **Paginasi & Kategori Responsif**: Bot Telegram dilengkapi navigasi paginasi (Prev/Next) yang rapi, dan Web Store dilengkapi filter kategori (AI Tools, Produktivitas, Hiburan, Edukasi) dengan squircle icon 3D modern.
+- **Stock & Orders**: Real-time stock status dari ProdSeller (`inStock` & `stock`), pemesanan otomatis via `POST /v1/orders` dengan proteksi idempotency, dan pengiriman akun/lisensi instan ke pembeli.
+- **Payment Options**: Pembayaran instan via QRIS (Rupiah dinamis otomatis) dan Binance Pay (USDT).
+- **Fallback Mode**: Produk native seperti generator Canva Education (`docs`) dan stok lokal `gemini` tetap aman dan terlindungi tanpa terpengaruh perubahan provider.
 
 ---
 

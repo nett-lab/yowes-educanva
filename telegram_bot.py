@@ -81,6 +81,7 @@ _shopee_qris_raw = os.getenv("SHOPEE_MERCHANT_QRIS_RAW", "").strip()
 _shopeepay_client = shopeepay_engine.ShopeePayClient()
 _amount_allocator = shopeepay_engine.UniqueAmountAllocator()
 _shopeepay_poller_task: asyncio.Task | None = None
+_last_shopee_admin_alert_ts: float = 0.0
 
 COUNTRY_LABELS = {
     "uk": "🇬🇧 United Kingdom",
@@ -218,10 +219,10 @@ _BROADCAST_TEMPLATES: dict[str, dict[str, str]] = {
         "id": (
             "📦 *UPDATE STOK PRODUK TERSEDIA* 📦\n\n"
             "Kabar gembira! Stok akun digital & lisensi resmi telah di-restock:\n\n"
-            "• 🎥 CapCut Pro\n"
-            "• 🤖 Claude AI API\n"
+            "• 🎥 Capcut Pro 1 Month FW\n"
+            "• 🤖 API CLAUDE -10M Token- 1Day\n"
             "• 💻 GPT Codex\n"
-            "• 📺 Prime Video\n"
+            "• 📺 Prime Video 6 Months\n"
             "• 🎓 Gemini Pro\n\n"
             "🚀 *Proses Otomatis & Cepat*\n"
             "Pembayaran instan via QRIS & USDT BinancePay 24/7."
@@ -229,10 +230,10 @@ _BROADCAST_TEMPLATES: dict[str, dict[str, str]] = {
         "en": (
             "📦 *PRODUCT RESTOCK ANNOUNCEMENT* 📦\n\n"
             "Great news! Digital accounts & subscriptions are now fully restocked:\n\n"
-            "• 🎥 CapCut Pro\n"
-            "• 🤖 Claude AI API\n"
+            "• 🎥 Capcut Pro 1 Month FW\n"
+            "• 🤖 API CLAUDE -10M Token- 1Day\n"
             "• 💻 GPT Codex\n"
-            "• 📺 Prime Video\n"
+            "• 📺 Prime Video 6 Months\n"
             "• 🎓 Gemini Pro\n\n"
             "🚀 *Instant & Automated Delivery*\n"
             "Available 24/7 via QRIS & USDT BinancePay."
@@ -321,45 +322,83 @@ _GEMINI_DEFAULT_INFO_ID = (
 _PRODUCT_CATALOG: dict[str, dict] = {
     "capcut": {
         "emoji": "🎥",
-        "label_id": "CapCut Pro",
-        "label_en": "CapCut Pro",
+        "label_id": "Capcut Pro 1 Month FW",
+        "label_en": "Capcut Pro 1 Month FW",
         "price_coins_key": "capcut_price",
         "price_idr_key": "capcut_price_idr",
         "price_qris_key": "capcut_qris_price_idr",
         "price_binance_key": "capcut_binance_price_usdt",
-        "default_coins": 50,
-        "default_idr": 30000,
-        "default_qris_idr": 30000,
-        "default_binance_usdt": "1.7",
+        "default_coins": 40,
+        "default_idr": 26000,
+        "default_qris_idr": 26000,
+        "default_binance_usdt": "1.62",
+        "markup_usdt": 0.5,
         "prodseller_default_id": "6a2fda51035a6d898f2106fe",
         "prodseller_id_env": "PRODSELLER_CAPCUT_ID",
         "prodseller_name_env": "PRODSELLER_CAPCUT_NAME",
-        "prodseller_default": "CapCut",
+        "prodseller_default": "Capcut Pro 1 Month FW",
         "stock_key": "capcut_manual_stock",
         "info_key": "capcut_info",
-        "default_info_id": "• Akun / Lisensi CapCut Pro Aktif\n• Tanpa watermark, ekspor hingga kualitas 4K\n• Akses semua template, font, musik & efek AI\n• Pengiriman cepat & garansi aktif",
-        "default_info_en": "• Active CapCut Pro Account / License\n• Watermark-free, export up to 4K quality\n• Full access to templates, fonts, music & AI tools\n• Fast delivery & active warranty",
+        "default_info_id": (
+            "Format Pengiriman: hotmail|passcapcut|passhotmail\n"
+            "• Akun Private Pro Team durasi penuh 30 hari (Full Warranty)\n"
+            "• Maksimal 2 perangkat dengan garansi penuh\n"
+            "• Akun stabil full 30 hari (bukan renewal 7 hari)\n"
+            "• Petunjuk Login: Login ke Aplikasi Mobile terlebih dahulu, kemudian scan QR code untuk login ke Laptop (Desktop App bukan web)."
+        ),
+        "default_info_en": (
+            "Delivery Format: hotmail|passcapcut|passhotmail\n"
+            "• Full 30 days private Pro Team account\n"
+            "• Maximum 2 devices, with full warranty\n"
+            "• Stable Account full 30 days (no 7 days renew)\n"
+            "• Login Instructions: Login to mobile App first next to laptop (desktop App no web) via QR code."
+        ),
     },
     "claude": {
         "emoji": "🤖",
-        "label_id": "Claude API",
-        "label_en": "Claude API",
+        "label_id": "API CLAUDE -10M Token- 1Day",
+        "label_en": "API CLAUDE -10M Token- 1Day",
         "price_coins_key": "claude_price",
         "price_idr_key": "claude_price_idr",
         "price_qris_key": "claude_qris_price_idr",
         "price_binance_key": "claude_binance_price_usdt",
-        "default_coins": 50,
-        "default_idr": 100000,
-        "default_qris_idr": 100000,
-        "default_binance_usdt": "5.00",
+        "default_coins": 25,
+        "default_idr": 19000,
+        "default_qris_idr": 19000,
+        "default_binance_usdt": "1.15",
+        "markup_usdt": 0.5,
         "prodseller_default_id": "6ac0e0ab5f3b1a835b386fe8",
         "prodseller_id_env": "PRODSELLER_CLAUDE_ID",
         "prodseller_name_env": "PRODSELLER_CLAUDE_NAME",
-        "prodseller_default": "Claude",
+        "prodseller_default": "API CLAUDE -10M Token- 1Day",
         "stock_key": "claude_manual_stock",
         "info_key": "claude_info",
-        "default_info_id": "• Akun / Langganan Claude API\n• Akses model canggih Claude 3.5 Sonnet / Opus\n• Kemampuan penalaran, coding & analisis dokumen tinggi\n• Limit pesan lebih besar & respon cepat",
-        "default_info_en": "• Claude API Account / Subscription\n• Access to advanced Claude 3.5 Sonnet / Opus models\n• High reasoning, coding & document analysis capabilities\n• Higher message limits & fast response times",
+        "default_info_id": (
+            "🔑 API CLAUDE - 10M Token - 1 Day\n\n"
+            "🛡️ 100% Genuine Claude API (Garansi uang kembali 100% jika tidak autentik)\n"
+            "⚡ Kompatibel & terhubung mulus dengan semua tools & IDE: 9router, Claude Dev, Cursor, VS Code, dll\n"
+            "⏳ Masa Berlaku: 1 Hari\n\n"
+            "📋 Petunjuk Setup Cepat:\n"
+            "🔹 Langkah 1: Kunjungi 👉 https://miraiapi.com/usage/#redeem untuk redeem kode Anda (masukkan kode yang didapat di detail pesanan)\n"
+            "🔹 Langkah 2: Kunjungi 👉 https://miraiapi.com/usage/#config untuk mengonfigurasi API Key, pilih target Aplikasi, dan pilih Model yang diinginkan\n"
+            "✨ Selesai & siap digunakan untuk coding!\n\n"
+            "📖 Dokumentasi & Panduan Lengkap:\n"
+            "🔗 https://docs.google.com/document/d/16smXXteTwJYdrxTfdZlJvOkSEFkVL_6UBxoXcXZH6Gc/edit?tab=t.tbg84q5rs9yi\n\n"
+            "⚠️ Catatan Penting: Masa berlaku (1 hari) hanya mulai berjalan setelah kode redeem diaktivasi. Anda dapat menyimpan kode terlebih dahulu."
+        ),
+        "default_info_en": (
+            "🔑 API CLAUDE - 10M Token - 1 day\n\n"
+            "🛡️ 100% Genuine Claude API (100% refund guaranteed if not authentic).\n"
+            "⚡ Seamlessly compatible with all tools & IDEs: 9router, Claude Dev, Cursor, VS Code, etc.\n"
+            "⏳ Validity: 1 Day\n\n"
+            "📋 Quick Setup Instructions:\n"
+            "🔹 Step 1: Visit 👉 https://miraiapi.com/usage/#redeem to redeem your code (Enter the code provided in your order details).\n"
+            "🔹 Step 2: Visit 👉 https://miraiapi.com/usage/#config to configure your API Key, select your target App, and choose the ideal Model.\n"
+            "✨ All done & Ready to code!\n\n"
+            "📖 Detailed Documentation & Guide:\n"
+            "🔗 https://docs.google.com/document/d/16smXXteTwJYdrxTfdZlJvOkSEFkVL_6UBxoXcXZH6Gc/edit?tab=t.tbg84q5rs9yi\n\n"
+            "⚠️ Important Notice: The validity period only starts counting once the redeem code is activated. You can store or resell the code."
+        ),
     },
     "codex": {
         "emoji": "💻",
@@ -603,24 +642,43 @@ _PRODUCT_CATALOG: dict[str, dict] = {
     },
     "primevideo": {
         "emoji": "📺",
-        "label_id": "Prime Video",
-        "label_en": "Prime Video",
+        "label_id": "Prime Video 6 Months",
+        "label_en": "Prime Video 6 Months",
         "price_coins_key": "primevideo_price",
         "price_idr_key": "primevideo_price_idr",
         "price_qris_key": "primevideo_qris_price_idr",
         "price_binance_key": "primevideo_binance_price_usdt",
         "default_coins": 35,
-        "default_idr": 35000,
-        "default_qris_idr": 35000,
-        "default_binance_usdt": "2.0",
+        "default_idr": 28000,
+        "default_qris_idr": 28000,
+        "default_binance_usdt": "1.70",
+        "markup_usdt": 0.5,
         "prodseller_default_id": "6a3d636221735658e32bd2a6",
         "prodseller_id_env": "PRODSELLER_PRIMEVIDEO_ID",
         "prodseller_name_env": "PRODSELLER_PRIMEVIDEO_NAME",
-        "prodseller_default": "Prime Video",
+        "prodseller_default": "Prime Video 6 Months ",
         "stock_key": "primevideo_manual_stock",
         "info_key": "primevideo_info",
-        "default_info_id": "• Langganan Amazon Prime Video Premium\n• Streaming film & series eksklusif Amazon Originals\n• Kualitas video hingga 4K UHD & HDR\n• Support Smartphone, Tablet, PC & Smart TV",
-        "default_info_en": "• Amazon Prime Video Premium Subscription\n• Stream exclusive movies & Amazon Originals\n• Video quality up to 4K UHD & HDR\n• Supports Smartphones, Tablets, PC & Smart TV",
+        "default_info_id": (
+            "⏳ Durasi: 180 Hari (6 Bulan Penuh)\n\n"
+            "FULL PRIVATE ACCOUNTS & FULL ACCESS TO EMAIL\n"
+            "Setelah menerima detail akun, Anda dapat langsung mulai menonton Amazon Prime Video di perangkat pilihan Anda.\n\n"
+            "Peraturan Penting & Garansi:\n"
+            "• Jangan mengubah kata sandi akun sebelum 24 jam pertama.\n"
+            "• Dilarang keras menyewa atau membeli film berbayar (Don't make any rental/purchase attempt) - Aturan paling penting.\n"
+            "• Hindari aktivitas login/logout yang berlebihan atau mencurigakan.\n"
+            "• Garansi: Garansi sampai berhasil login."
+        ),
+        "default_info_en": (
+            "⏳ Duration: 180 days (6 Months)\n\n"
+            "FULL PRIVATE ACCOUNTS & FULL ACCESS TO EMAIL\n"
+            "After receiving your account details, you can start watching Amazon Prime Video immediately on your preferred device.\n\n"
+            "Important Rules & Warranty:\n"
+            "• Do not change the account password before 24 hours.\n"
+            "• Do not try to rent or purchase anything and Don't make any purchase attempt with this account - Most important rule.\n"
+            "• Avoid excessive logins/logouts or suspicious activity.\n"
+            "• Warranty: Warranty until successful login."
+        ),
     },
     "chatgpt_k12": {
         "emoji": "🧠",
@@ -819,6 +877,151 @@ _PRODUCT_CATALOG: dict[str, dict] = {
         ),
     },
 }
+
+
+def _slugify_product_name(name: str, pid: str = "") -> str:
+    """Generate a clean URL-friendly identifier for dynamic ProdSeller products."""
+    clean = re.sub(r"[^a-zA-Z0-9]+", "_", name.lower()).strip("_")
+    parts = [
+        p for p in clean.split("_")
+        if p and p not in (
+            "fw", "nw", "link", "code", "account", "plus", "1m", "1y", "12m", "2y", "3m", "6m",
+            "days", "day", "token", "tokens", "devices", "device", "users", "user", "pack",
+            "panel", "credits", "credit", "invite", "invitations"
+        )
+    ]
+    slug = "_".join(parts[:3]) if parts else clean[:12]
+    return slug or f"ps_{pid[:6]}"
+
+
+def _deduce_category_and_emoji(name: str) -> tuple[str, str, str]:
+    """Deduce (category_id, category_en, emoji) based on product title."""
+    low = name.lower()
+    if any(k in low for k in ("gpt", "claude", "codex", "gemini", "ai", "deepseek", "kimi", "elevenlabs", "framer")):
+        return "AI Tools", "AI Tools", "🤖"
+    if any(k in low for k in ("spotify", "music", "audio", "sound")):
+        return "Hiburan", "Entertainment", "🎵"
+    if any(k in low for k in ("youtube", "netflix", "prime", "video", "apple tv", "tv", "shahid", "scribd", "film", "cinema")):
+        return "Hiburan", "Entertainment", "📺"
+    if any(k in low for k in ("freefire", "diamond", "game", "steam", "playstation", "xbox", "roblox")):
+        return "Hiburan", "Entertainment", "🎮"
+    if any(k in low for k in ("edu", "canva", "edx", "jetbrains", "student", "teacher", "school", "course", "belajar")):
+        return "Edukasi", "Education", "🎓"
+    if any(k in low for k in ("vpn", "proxy", "v2ray", "hma", "nord", "avira", "expressvpn")):
+        return "Produktivitas", "Productivity", "🛡️"
+    if any(k in low for k in ("figma", "adobe", "autodesk", "miro", "notion", "office", "word", "excel", "pdf", "mail", "outlook", "hotmail", "gmail")):
+        return "Produktivitas", "Productivity", "💼"
+    return "Produktivitas", "Productivity", "⚡"
+
+
+def _sync_prodseller_catalog(prodseller_items: list[dict]) -> None:
+    """Synchronize live ProdSeller products into the active catalog with 0.5 USDT markup.
+
+    - Automatically adds new products from ProdSeller to _PRODUCT_CATALOG with markup 0.5 USDT.
+    - Updates live stock status and pricing dynamically.
+    - Automatically removes products that are no longer present in ProdSeller.
+    """
+    if not prodseller_items or not isinstance(prodseller_items, list):
+        return
+
+    active_prodseller_ids = {str(p.get("id")) for p in prodseller_items if p.get("id")}
+    matched_keys: set[str] = set()
+
+    for p in prodseller_items:
+        pid = str(p.get("id", "")).strip()
+        if not pid:
+            continue
+        p_name = str(p.get("name", "")).strip()
+        try:
+            p_price = float(p.get("price") or 0.0)
+        except (ValueError, TypeError):
+            p_price = 0.0
+
+        p_stock = p.get("stock")
+        p_in_stock = (p.get("inStock") is not False) and (p_stock is None or p_stock > 0)
+        p_desc = str(p.get("description") or "").strip()
+
+        # Pricing with +0.5 USDT markup
+        markup = 0.5
+        price_usdt = round(p_price + markup, 2)
+        price_usdt_str = f"{price_usdt:.2f}".rstrip("0").rstrip(".")
+        if price_usdt_str.endswith("."):
+            price_usdt_str = price_usdt_str[:-1]
+        price_idr = int(round((price_usdt * 16200) / 1000) * 1000)
+
+        # 1. Match against existing entry
+        matched_key = None
+        for k, cfg in _PRODUCT_CATALOG.items():
+            cfg_id = str(cfg.get("prodseller_default_id", "")).strip()
+            env_id = os.getenv(cfg.get("prodseller_id_env", ""), "").strip()
+            cfg_name = str(cfg.get("prodseller_default", "")).strip().lower()
+            if (cfg_id and cfg_id == pid) or (env_id and env_id == pid) or (cfg_name and cfg_name == p_name.lower()):
+                matched_key = k
+                break
+
+        if matched_key:
+            cfg = _PRODUCT_CATALOG[matched_key]
+            cfg["prodseller_default_id"] = pid
+            cfg["default_binance_usdt"] = price_usdt_str
+            cfg["default_idr"] = price_idr
+            cfg["default_qris_idr"] = price_idr
+            cfg["markup_usdt"] = markup
+            cfg["in_stock"] = p_in_stock
+            if p_desc and not cfg.get("default_info_id"):
+                cfg["default_info_id"] = p_desc
+                cfg["default_info_en"] = p_desc
+            matched_keys.add(matched_key)
+        else:
+            # 2. Automatically register new product from ProdSeller
+            base_slug = _slugify_product_name(p_name, pid)
+            key = base_slug
+            idx = 1
+            while key in _PRODUCT_CATALOG or key in ("docs", "gemini"):
+                key = f"{base_slug}_{pid[:4]}"
+                if key in _PRODUCT_CATALOG:
+                    key = f"{base_slug}_{idx}"
+                    idx += 1
+
+            cat_id, cat_en, emoji = _deduce_category_and_emoji(p_name)
+            desc = p_desc or f"• {p_name}\n• Lisensi Resmi & Garansi Aktif\n• Pengiriman Instan Otomatis 24/7"
+
+            _PRODUCT_CATALOG[key] = {
+                "emoji": emoji,
+                "label_id": p_name,
+                "label_en": p_name,
+                "category": cat_id,
+                "category_en": cat_en,
+                "price_coins_key": f"{key}_price",
+                "price_idr_key": f"{key}_price_idr",
+                "price_qris_key": f"{key}_qris_price_idr",
+                "price_binance_key": f"{key}_binance_price_usdt",
+                "default_coins": max(5, int(round(price_usdt * 20))),
+                "default_idr": price_idr,
+                "default_qris_idr": price_idr,
+                "default_binance_usdt": price_usdt_str,
+                "markup_usdt": markup,
+                "prodseller_default_id": pid,
+                "prodseller_id_env": f"PRODSELLER_{key.upper()}_ID",
+                "prodseller_name_env": f"PRODSELLER_{key.upper()}_NAME",
+                "prodseller_default": p_name,
+                "stock_key": f"{key}_manual_stock",
+                "info_key": f"{key}_info",
+                "default_info_id": desc,
+                "default_info_en": desc,
+                "in_stock": p_in_stock,
+                "is_dynamic_prodseller": True,
+            }
+            matched_keys.add(key)
+
+    # 3. Automatically remove ProdSeller products that no longer exist in ProdSeller
+    for k in list(_PRODUCT_CATALOG.keys()):
+        if k in ("docs", "gemini"):
+            continue
+        cfg = _PRODUCT_CATALOG[k]
+        cfg_pid = str(cfg.get("prodseller_default_id", "")).strip()
+        if k not in matched_keys and (cfg.get("is_dynamic_prodseller") or (cfg_pid and cfg_pid not in active_prodseller_ids)):
+            logger.info("Auto-removing product no longer in ProdSeller: %s (%s)", k, cfg.get("label_en"))
+            del _PRODUCT_CATALOG[k]
 
 
 def _get_catalog_product_price(key: str, pp: dict | None = None) -> tuple[int, str]:
@@ -1157,6 +1360,7 @@ async def _prodseller_products(force_refresh: bool = False) -> list[dict]:
     payload = await asyncio.to_thread(_prodseller_request_sync, "GET", "/products")
     products = payload.get("products", [])
     _prodseller_products_cache = (time.time() + 60, products)
+    _sync_prodseller_catalog(products)
     return products
 
 
@@ -2083,6 +2287,7 @@ def _get_product_stock_status(key: str) -> bool:
                 items = payload.get("products", [])
                 if items:
                     _prodseller_products_cache = (time.time() + 60, items)
+                    _sync_prodseller_catalog(items)
             except Exception as exc:
                 logger.debug("Live stock auto-refresh error: %s", exc)
 
@@ -2126,7 +2331,7 @@ def _is_product_active(key: str) -> bool:
     return _setting(f"active_{key}", 1) == 1
 
 
-def _main_menu_keyboard(update: Update) -> InlineKeyboardMarkup:
+def _main_menu_keyboard(update: Update, page: int = 0) -> InlineKeyboardMarkup:
     english = _language(update) == "en"
     doc_price = _setting("doc_price", 3)
     if english:
@@ -2136,15 +2341,18 @@ def _main_menu_keyboard(update: Update) -> InlineKeyboardMarkup:
 
     gemini_dot = "🟢" if _get_product_stock_status("gemini") else "🔴"
 
-    product_buttons = []
+    all_items = []
     if _is_product_active("docs"):
-        product_buttons.append([InlineKeyboardButton(f"🎓 Canva Doc Education · {doc_price} 🪙 · 🟢", callback_data="product:docs")])
+        all_items.append((
+            f"🎓 Canva Doc Education · {doc_price} 🪙 · 🟢",
+            "product:docs",
+        ))
     if _is_product_active("gemini"):
-        product_buttons.append([InlineKeyboardButton(
+        gem_label = (
             f"✨ Gemini Pro 18 Bulan · {gemini_price} · {gemini_dot}" if not english
-            else f"✨ Gemini Pro 18 Months · {gemini_price} · {gemini_dot}",
-            callback_data="product:gemini",
-        )])
+            else f"✨ Gemini Pro 18 Months · {gemini_price} · {gemini_dot}"
+        )
+        all_items.append((gem_label, "product:gemini"))
 
     for key, cfg in _PRODUCT_CATALOG.items():
         if not _is_product_active(key):
@@ -2152,9 +2360,28 @@ def _main_menu_keyboard(update: Update) -> InlineKeyboardMarkup:
         price_idr, price_usdt = _get_catalog_product_price(key)
         price_str = f"{price_usdt} USDT" if english else _format_idr(price_idr)
         stock_dot = "🟢" if _get_product_stock_status(key) else "🔴"
-        label = cfg["label_en"] if english else cfg["label_id"]
+        label = cfg.get("label_en") if english else cfg.get("label_id")
+        btn_text = f"{cfg.get('emoji', '📦')} {label} · {price_str} · {stock_dot}"
+        all_items.append((btn_text, f"product:{key}"))
+
+    PAGE_SIZE = 8
+    total_pages = max(1, (len(all_items) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+
+    start_idx = page * PAGE_SIZE
+    page_items = all_items[start_idx : start_idx + PAGE_SIZE]
+
+    product_buttons = []
+    for btn_text, cb_data in page_items:
+        product_buttons.append([InlineKeyboardButton(btn_text, callback_data=cb_data)])
+
+    if total_pages > 1:
+        prev_p = page - 1 if page > 0 else total_pages - 1
+        next_p = page + 1 if page < total_pages - 1 else 0
         product_buttons.append([
-            InlineKeyboardButton(f"{cfg['emoji']} {label} · {price_str} · {stock_dot}", callback_data=f"product:{key}")
+            InlineKeyboardButton("◀️ Prev" if english else "◀️ Sebelumnya", callback_data=f"menu:page:{prev_p}"),
+            InlineKeyboardButton(f"📄 {page + 1}/{total_pages}", callback_data=f"menu:page:{page}"),
+            InlineKeyboardButton("Next ▶️" if english else "Berikutnya ▶️", callback_data=f"menu:page:{next_p}"),
         ])
 
     refresh_button = [
@@ -2242,12 +2469,13 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, edi
             except Exception as exc:
                 logger.info("Could not fetch ProdSeller products in show_main_menu: %s", exc)
     menu_text = _main_menu_text(update, refreshed=refreshed)
+    page = context.user_data.get("menu_page", 0) if context and context.user_data else 0
     if edit and update.callback_query is not None:
         await _safe_edit_text(
-            update, menu_text, parse_mode="Markdown", reply_markup=_main_menu_keyboard(update)
+            update, menu_text, parse_mode="Markdown", reply_markup=_main_menu_keyboard(update, page=page)
         )
     else:
-        await _safe_reply_text(update, menu_text, parse_mode="Markdown", reply_markup=_main_menu_keyboard(update))
+        await _safe_reply_text(update, menu_text, parse_mode="Markdown", reply_markup=_main_menu_keyboard(update, page=page))
 
 
 def _process_referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2310,7 +2538,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "• Fill in profile details and confirm.\n"
             "• Documents generated instantly using coins (🪙).\n\n"
             "🛍️ <b>Digital Products:</b>\n"
-            "• Available: Gemini Pro, CapCut Pro, Claude API, GPT Codex, Prime Video.\n"
+            "• Available: Gemini Pro, Capcut Pro 1 Month FW, API CLAUDE -10M Token- 1Day, GPT Codex, Prime Video 6 Months.\n"
             "• Instant payment via <b>QRIS</b> (IDR) & <b>Binance Pay</b> (USDT).\n"
             "• Automated delivery straight to your chat.\n\n"
             "✨ <b>Other Menus & Rewards:</b>\n"
@@ -2327,7 +2555,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "• Lengkapi data profil lalu konfirmasi.\n"
             "• Dokumen dibuat instan menggunakan koin (🪙).\n\n"
             "🛍️ <b>Produk Digital:</b>\n"
-            "• Tersedia: Gemini Pro, CapCut Pro, Claude API, GPT Codex, Prime Video.\n"
+            "• Tersedia: Gemini Pro, Capcut Pro 1 Month FW, API CLAUDE -10M Token- 1Day, GPT Codex, Prime Video 6 Months.\n"
             "• Pembayaran otomatis via <b>QRIS</b> (Rupiah) & <b>Binance Pay</b> (USDT).\n"
             "• Akun/lisensi dikirim otomatis langsung ke chat bot.\n\n"
             "✨ <b>Menu & Fitur Lainnya:</b>\n"
@@ -3181,6 +3409,13 @@ async def _fulfill_payment_request(context: ContextTypes.DEFAULT_TYPE | Any, pay
             if not delivered and not order_fulfilled:
                 raise ProdSellerError("Semua stok Gemini Pro (online & lokal) sedang kosong. Admin akan segera memproses.")
 
+        # Ensure file/download URL is cleanly appended if not already present in delivered text
+        if file_url and file_url not in delivered:
+            if delivered:
+                delivered = f"{delivered}\n\nLink / File Download: {file_url}"
+            else:
+                delivered = file_url
+
         # Save fulfilled delivery to database
         with _db() as connection:
             connection.execute(
@@ -3566,6 +3801,25 @@ async def _shopeepay_mutation_poller(application) -> None:
                 continue
 
             recent_txs = await _shopeepay_client.fetch_recent_transactions(30)
+            if getattr(_shopeepay_client, "is_session_expired", False):
+                global _last_shopee_admin_alert_ts
+                now_ts = time.time()
+                if now_ts - _last_shopee_admin_alert_ts > 3600:
+                    _last_shopee_admin_alert_ts = now_ts
+                    for admin_id in _admin_ids():
+                        try:
+                            await application.bot.send_message(
+                                chat_id=admin_id,
+                                text=(
+                                    "⚠️ <b>ShopeePay Merchant Session Expired!</b>\n\n"
+                                    "Sesi login ShopeePay Merchant (Cookie/Token) telah kedaluwarsa (<i>login timeout</i>).\n"
+                                    "Pengecekan mutasi otomatis QRIS dihentikan sementara sampai Anda memperbarui "
+                                    "<code>SHOPEE_MERCHANT_COOKIE</code> dan <code>SHOPEE_MERCHANT_TOKEN</code> di file <code>.env</code>."
+                                ),
+                                parse_mode="HTML",
+                            )
+                        except Exception as alert_err:
+                            logger.debug("Failed notifying admin about ShopeePay expiry: %s", alert_err)
             if not recent_txs:
                 continue
 
@@ -3758,6 +4012,18 @@ async def handle_dashboard_callback(update: Update, context: ContextTypes.DEFAUL
                 )
             except TelegramError:
                 pass
+        return
+
+    if data.startswith("menu:page:"):
+        try:
+            page_num = int(data.split(":")[2])
+        except (ValueError, IndexError):
+            page_num = 0
+        context.user_data["menu_page"] = page_num
+        menu_text = _main_menu_text(update, refreshed=False)
+        await _safe_edit_text(
+            update, menu_text, parse_mode="Markdown", reply_markup=_main_menu_keyboard(update, page=page_num)
+        )
         return
 
     if data.startswith("product:"):
